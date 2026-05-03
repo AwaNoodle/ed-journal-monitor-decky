@@ -26,10 +26,19 @@ export default definePlugin(() => {
     if (data.bRunning) {
       console.log("Elite Dangerous started, starting watcher...");
       try {
+        // Check if monitor is enabled before starting
+        const status = await getStatus();
+        if (!status.enabled) {
+          console.log("Monitor is disabled, not starting watcher");
+          return;
+        }
         // Re-scan for journal path if needed
         const pathResult = await findJournalPath();
         if (pathResult.success) {
-          await startWatcher();
+          const result = await startWatcher();
+          if (!result.success) {
+            console.warn("Watcher failed to start:", result.error);
+          }
         } else {
           console.warn("Journal path not found, watcher not started");
         }

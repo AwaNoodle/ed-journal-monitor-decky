@@ -98,6 +98,50 @@ class TestSDCardEjection:
         # Path should be valid again
         assert finder._validate_path(path) is True
 
+    @pytest.mark.asyncio
+    async def test_cached_path_preserved_when_unavailable(self, tmp_path):
+        """
+        When a cached path becomes temporarily unavailable (e.g. SD card ejected),
+        the cache SHALL NOT be cleared. When the path becomes available again,
+        find_journal_path should return it from cache.
+        """
+        settings = MockSettings()
+        finder = JournalPathFinder(settings)
+
+        # Create journal dir
+        journal_dir = tmp_path / "journals"
+        journal_dir.mkdir()
+        (journal_dir / "Journal.2026-01-12T120000.01.log").write_text("{}")
+        path = str(journal_dir)
+
+        # Cache the path
+        await settings.set("journal_path", path)
+        await settings.set("journal_path_source", "auto")
+
+        # Verify cached path is returned when available
+        result = await finder.find_journal_path()
+        assert result == path
+
+        # Simulate SD card ejection: remove the directory
+        import shutil
+        shutil.rmtree(journal_dir)
+
+        # find_journal_path should return None (unavailable)
+        result = await finder.find_journal_path()
+        assert result is None
+
+        # CRITICAL: cache must be preserved in settings
+        assert settings.get("journal_path") == path
+        assert settings.get("journal_path_source") == "auto"
+
+        # Simulate SD card reinsertion: recreate the directory
+        journal_dir.mkdir()
+        (journal_dir / "Journal.2026-01-12T120000.01.log").write_text("{}")
+
+        # find_journal_path should now return the cached path again
+        result = await finder.find_journal_path()
+        assert result == path
+
 
 class TestNoRootNeeded:
     """Verify that all operations work without root access."""

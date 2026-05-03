@@ -5,6 +5,7 @@ Journal path finder.
 Auto-discovers the ED journal directory by scanning Steam library configuration.
 """
 
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,20 +16,6 @@ if TYPE_CHECKING:
     from src.modules.settings import PluginSettings
 
 ED_APPID = "359320"
-
-# EDDN reportable events
-REPORTABLE_EVENTS = {"FSDJump", "Scan", "Location", "Docked", "FSSDiscoveryScan"}
-
-# Fields that EDDN disallows - must be stripped before submission
-EDDN_DISALLOWED_FIELDS = {
-    "ActiveFine",
-    "Crew",
-    "Fines",
-    "HottestSystem",
-    "HottestMarket",
-    "Collected",
-    "HottestCommodity",
-}
 
 
 class JournalPathFinder:
@@ -51,8 +38,10 @@ class JournalPathFinder:
             if validated:
                 decky.logger.info(f"Using cached journal path: {cached_path}")
                 return cached_path
-            decky.logger.info("Cached journal path invalid, clearing cache")
-            await self.settings.set("journal_path", None)
+            # Path may be temporarily unavailable (e.g. SD card ejected).
+            # Do NOT clear cache — spec requires preserving it for reinsertion recovery.
+            decky.logger.info("Cached journal path temporarily unavailable")
+            return None
 
         # Step 2: VDF scan
         home = self._get_home_dir()
@@ -94,9 +83,9 @@ class JournalPathFinder:
 
     def _get_home_dir(self) -> str | None:
         """Get the user's home directory from Decky environment."""
-        home = os.environ.get("DECKY_USER_HOME") if (os := __import__("os")) else None
+        home = os.environ.get("DECKY_USER_HOME")
         if not home:
-            home = __import__("os").path.expanduser("~")
+            home = str(Path.home())
         return home
 
     def _parse_libraryfolders_vdf(self, home: str) -> list[str]:

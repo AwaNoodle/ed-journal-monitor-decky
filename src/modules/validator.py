@@ -5,7 +5,12 @@ EDDN event validator.
 Validates journal events against EDDN journal/1 schema requirements.
 """
 
-from src.modules.parser import EDDN_DISALLOWED_FIELDS, ParsedEvent, SessionState
+from typing import TYPE_CHECKING
+
+from src.modules.constants import EDDN_DISALLOWED_FIELDS
+
+if TYPE_CHECKING:
+    from src.modules.parser import ParsedEvent, SessionState
 
 # Required fields per event type for EDDN journal/1 schema
 REQUIRED_FIELDS: dict[str, list[str]] = {

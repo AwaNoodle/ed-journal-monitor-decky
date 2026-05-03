@@ -68,6 +68,9 @@ class Plugin:
         if not self.watcher:
             return {"success": False, "error": "Watcher not initialized"}
 
+        if not self.settings.get("enabled", True):
+            return {"success": False, "error": "Monitor is disabled"}
+
         if self.watcher.is_running:
             return {"success": True, "status": "already_running"}
 

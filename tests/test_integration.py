@@ -176,3 +176,24 @@ class TestEndToEndPipeline:
         # Poll on empty directory
         await watcher._poll()
         assert len(submitted_messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_start_watcher_blocked_when_disabled(self, tmp_path):
+        """When enabled=False, start_watcher should refuse to start."""
+        settings = MockSettings()
+        settings._data["enabled"] = False
+        parser = JournalParser()
+        validator = EDDNValidator()
+        submitter = EDDNSubmitter(settings)
+        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+
+        # Create a valid journal dir so path validation passes
+        journal_dir = tmp_path / "journals"
+        journal_dir.mkdir()
+        (journal_dir / "Journal.2026-01-12T120000.01.log").write_text("{}")
+
+        # Attempt to start watcher while disabled
+        await watcher.start(str(journal_dir))
+
+        # Watcher should NOT be running
+        assert not watcher.is_running

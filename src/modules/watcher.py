@@ -49,6 +49,10 @@ class JournalWatcher:
         if self.is_running:
             return
 
+        if not self.settings.get("enabled", True):
+            decky.logger.info("Monitor is disabled, not starting watcher")
+            return
+
         self._journal_path = journal_path
         self._poll_interval = self.settings.get("poll_interval", 10)
         self.is_running = True

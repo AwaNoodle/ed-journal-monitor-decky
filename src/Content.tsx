@@ -121,7 +121,7 @@ const Content = (): JSX.Element => {
   const getStatusText = (): string => {
     if (!enabled) return "⚪ Disabled";
     if (!journalPath) return "🔍 Journal path not found";
-    if (watcherRunning) return "🟢 Watching";
+    if (watcherRunning) return "🟢 Watching — uploading journal events";
     return "⚪ Idle — waiting for Elite Dangerous";
   };
 
