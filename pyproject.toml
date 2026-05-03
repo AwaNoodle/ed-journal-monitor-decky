@@ -1,0 +1,81 @@
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "ANN",  # flake8-annotations
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "COM",  # flake8-commas
+    "C4",   # flake8-comprehensions
+    "DTZ",  # flake8-datetimez
+    "EM",   # flake8-errmsg
+    "ISC",  # flake8-implicit-str-concat
+    "ICN",  # flake8-import-conventions
+    "LOG",  # flake8-logging
+    "PIE",  # flake8-pie
+    "PYI",  # flake8-pyi
+    "RET",  # flake8-return
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "TCH",  # flake8-type-checking
+    "ARG",  # flake8-unused-arguments
+    "PTH",  # flake8-use-pathlib
+    "PL",   # pylint
+    "RUF",  # ruff-specific
+    "S",    # flake8-bandit
+]
+ignore = [
+    "S101",    # use of assert
+    "PLR0913", # too many arguments
+    "EM101",   # raw string in exception
+    "EM102",   # f-string in exception
+    "S310",    # audit URL open for permitted schemes (we only POST to EDDN)
+    "S311",    # pseudo-random generators not for crypto (we use random for jitter)
+    "S108",    # insecure /tmp usage (test mocks only)
+    "ASYNC230",# blocking open() in async (no aiofiles available on Steam Deck)
+    "ASYNC240",# pathlib.Path in async (no trio/anyio on Steam Deck)
+    "ASYNC210",# blocking HTTP in async (no aiohttp on Steam Deck)
+    "COM812",   # trailing comma conflicts with ruff format
+    "ISC001",   # implicit str concat conflicts with ruff format
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/modules/**" = [
+    "E402",   # module-level imports after __future__ + docstring
+]
+"tests/**" = [
+    "ANN",    # no type annotations required in tests
+    "S101",   # assert is fine in tests
+    "ARG",    # unused args ok in test fixtures
+    "PLR2004",# magic values ok in tests
+    "E402",   # module-level imports after sys.path manipulation
+    "PLC0415",# imports inside test functions for mock patching
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "decky"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "decky"
+ignore_missing_imports = true
