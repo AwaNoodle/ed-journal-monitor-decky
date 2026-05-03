@@ -171,6 +171,126 @@ class TestRetryLogic:
         assert mock_urlopen.call_count == MAX_RETRIES + 1
 
 
+class TestActivityLogIntegration:
+    """Tests for ActivityLog integration in submitter."""
+
+    @pytest.mark.asyncio
+    async def test_success_records_activity(self):
+        from src.modules.activity_log import ActivityLog
+
+        log = ActivityLog()
+        submitter = EDDNSubmitter(MockSettings(), activity_log=log)
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "FSDJump"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                await submitter.submit(message)
+
+        entries = log.get_recent()
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "success"
+        assert entries[0]["event_type"] == "FSDJump"
+
+    @pytest.mark.asyncio
+    async def test_http_failure_records_activity(self):
+        import urllib.error
+
+        from src.modules.activity_log import ActivityLog
+
+        log = ActivityLog()
+        submitter = EDDNSubmitter(MockSettings(), activity_log=log)
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "Scan"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            error_400 = urllib.error.HTTPError(
+                EDDN_URL, 400, "Bad Request", {}, None,
+            )
+            mock_urlopen.side_effect = error_400
+
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                await submitter.submit(message)
+
+        entries = log.get_recent()
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "failure"
+        assert entries[0]["event_type"] == "Scan"
+        assert entries[0]["error_type"] == "http_error"
+        assert entries[0]["http_status"] == 400
+
+    @pytest.mark.asyncio
+    async def test_network_failure_records_activity(self):
+        from src.modules.activity_log import ActivityLog
+
+        log = ActivityLog()
+        submitter = EDDNSubmitter(MockSettings(), activity_log=log)
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "Docked"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = TimeoutError("Connection timed out")
+
+            with patch("src.modules.submitter.asyncio_sleep", new_callable=AsyncMock), \
+                 patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                await submitter.submit(message)
+
+        entries = log.get_recent()
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "failure"
+        assert entries[0]["error_type"] == "network_error"
+        assert entries[0]["http_status"] is None
+
+    @pytest.mark.asyncio
+    async def test_upload_success_event_includes_event_name(self):
+        from src.modules.activity_log import ActivityLog
+
+        log = ActivityLog()
+        submitter = EDDNSubmitter(MockSettings(), activity_log=log)
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "FSDJump"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                await submitter.submit(message)
+
+        # Find the upload_success emit call
+        emit_calls = mock_decky.emit.call_args_list
+        success_call = next(c for c in emit_calls if c[0][0] == "upload_success")
+        assert success_call[0][1]["event_name"] == "FSDJump"
+
+    @pytest.mark.asyncio
+    async def test_get_stats_includes_last_upload_event(self):
+        submitter = EDDNSubmitter(MockSettings())
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "Docked"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                await submitter.submit(message)
+
+        stats = submitter.get_stats()
+        assert stats["last_upload_event"] == "Docked"
+
+
 class TestStats:
     """Tests for upload statistics tracking."""
 

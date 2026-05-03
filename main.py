@@ -3,9 +3,12 @@ ED Journal Monitor - Decky Plugin Backend
 Monitors Elite Dangerous journal files and submits events to EDDN.
 """
 
+from __future__ import annotations
+
 import logging
 
 import decky
+from src.modules.activity_log import ActivityLog
 from src.modules.diagnostics import create_diagnostics as _create_diagnostics
 from src.modules.parser import JournalParser
 from src.modules.path_finder import JournalPathFinder
@@ -21,6 +24,7 @@ class Plugin:
         self.path_finder: JournalPathFinder | None = None
         self.parser: JournalParser | None = None
         self.validator: EDDNValidator | None = None
+        self.activity_log: ActivityLog | None = None
         self.submitter: EDDNSubmitter | None = None
         self.watcher: JournalWatcher | None = None
 
@@ -35,7 +39,8 @@ class Plugin:
         self.path_finder = JournalPathFinder(self.settings)
         self.parser = JournalParser()
         self.validator = EDDNValidator()
-        self.submitter = EDDNSubmitter(self.settings)
+        self.activity_log = ActivityLog()
+        self.submitter = EDDNSubmitter(self.settings, activity_log=self.activity_log)
         self.watcher = JournalWatcher(
             settings=self.settings,
             parser=self.parser,
@@ -129,6 +134,7 @@ class Plugin:
             "uploader_id": uploader_id,
             "enabled": self.settings.get("enabled", True) if self.settings else True,
             "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
+            "last_upload_event": stats.get("last_upload_event"),
             **stats,
         }
 
@@ -162,3 +168,9 @@ class Plugin:
             watcher=self.watcher,
             submitter=self.submitter,
         )
+
+    async def get_recent_activity(self, limit: int = 50, outcome: str | None = None) -> list[dict]:
+        """Get recent activity log entries."""
+        if not self.activity_log:
+            return []
+        return self.activity_log.get_recent(limit=limit, outcome=outcome)

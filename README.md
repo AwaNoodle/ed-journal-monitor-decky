@@ -11,6 +11,7 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 - **Steam Deck optimized**: Lightweight polling-based watcher, minimal resource usage
 - **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
 - **Detailed logging toggle**: Increase log verbosity from INFO to DEBUG for richer diagnostic capture
+- **Activity log & error display**: See recent upload activity and errors in real-time, with event-level detail on failures
 
 ## Architecture
 

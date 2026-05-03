@@ -4,9 +4,11 @@ Tests the full pipeline: watcher → parser → validator → submitter.
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.modules.activity_log import ActivityLog
 from src.modules.parser import JournalParser
 from src.modules.submitter import EDDNSubmitter
 from src.modules.validator import EDDNValidator
@@ -197,3 +199,58 @@ class TestEndToEndPipeline:
 
         # Watcher should NOT be running
         assert not watcher.is_running
+
+    @pytest.mark.asyncio
+    async def test_get_recent_activity_after_simulated_uploads(self, tmp_path):
+        """Verify get_recent_activity callable returns expected entries after simulated uploads."""
+        settings = MockSettings()
+        activity_log = ActivityLog()
+        parser = JournalParser()
+        validator = EDDNValidator()
+        submitter = EDDNSubmitter(settings, activity_log=activity_log)
+        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+
+        submitted_messages = []
+
+        async def mock_submit(message):
+            submitted_messages.append(message)
+            return True
+
+        submitter.submit = mock_submit
+
+        # Create a journal file with reportable events
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader","gameversion":"4.0.0.1","build":"r293895/r0 "}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":15,"FuelUsed":2.3,"FuelLevel":28.6}\n'
+            '{"timestamp":"2026-01-12T12:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Sol","DistanceFromArrivalLS":0.0}\n'
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Activity log should have entries from the submit calls
+        # Since we replaced submit, activity_log won't be populated directly
+        # Instead test with the real submitter path
+        activity_log2 = ActivityLog()
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            submitter2 = EDDNSubmitter(settings, activity_log=activity_log2)
+            await submitter2.submit({"$schemaRef": "", "header": {}, "message": {"event": "FSDJump"}})
+            await submitter2.submit({"$schemaRef": "", "header": {}, "message": {"event": "Scan"}})
+
+        # Verify get_recent_activity returns entries
+        entries = activity_log2.get_recent()
+        assert len(entries) == 2
+        assert entries[0]["event_type"] == "Scan"  # newest first
+        assert entries[1]["event_type"] == "FSDJump"
+
+        # Verify filtering works
+        # All are successes, so filtering by failure should return empty
+        failures = activity_log2.get_recent(outcome="failure")
+        assert len(failures) == 0

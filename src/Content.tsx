@@ -20,6 +20,7 @@ const setEnabled = callable<[boolean], Record<string, unknown>>("set_enabled");
 const setUploaderId = callable<[string], Record<string, unknown>>("set_uploader_id");
 const setDetailedLogging = callable<[boolean], Record<string, unknown>>("set_detailed_logging");
 const createDiagnosticsBundle = callable<[], DiagnosticsResult>("create_diagnostics");
+const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("get_recent_activity");
 
 const Content = (): JSX.Element => {
   const [enabled, setEnabledState] = useState(true);
@@ -35,6 +36,9 @@ const Content = (): JSX.Element => {
   const [pathError, setPathError] = useState<string | null>(null);
   const [detailedLogging, setDetailedLoggingState] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticsResult | null>(null);
+  const [recentErrors, setRecentErrors] = useState<ActivityEntry[]>([]);
+  const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
+  const [lastUploadEvent, setLastUploadEvent] = useState<string | null>(null);
 
   // Load initial status
   useEffect((): void => {
@@ -48,6 +52,7 @@ const Content = (): JSX.Element => {
         setSuccessCount(status.success_count);
         setFailCount(status.fail_count);
         setLastUpload(status.last_upload_time);
+        setLastUploadEvent(status.last_upload_event);
         const uid = status.uploader_id;
         setUploaderIdState(uid);
         setUploaderIdInput(uid);
@@ -65,20 +70,50 @@ const Content = (): JSX.Element => {
       setSuccessCount(data.success_count);
       setFailCount(data.fail_count);
       setLastUpload(data.last_upload_time);
+      setLastUploadEvent(data.last_upload_event);
     });
 
     const successListener = addEventListener("upload_success", (data: UploadSuccessEvent): void => {
       setSuccessCount(data.total_success);
+      setLastUploadEvent(data.event_name);
     });
 
     const failListener = addEventListener("upload_failed", (data: UploadFailedEvent): void => {
       setFailCount(data.total_failed);
     });
 
+    const activityListener = addEventListener("activity_update", (entry: ActivityEntry): void => {
+      // Add to recent activity (keep last 10)
+      setRecentActivity((prev): ActivityEntry[] => {
+        const updated = [entry, ...prev];
+        return updated.slice(0, 10);
+      });
+      // Add to errors if failure (keep last 5)
+      if (entry.outcome === "failure") {
+        setRecentErrors((prev): ActivityEntry[] => {
+          const updated = [entry, ...prev];
+          return updated.slice(0, 5);
+        });
+      }
+    });
+
+    // Fetch initial activity
+    void (async (): Promise<void> => {
+      try {
+        const activity = await getRecentActivity(10);
+        setRecentActivity(activity);
+        const errors = await getRecentActivity(5, "failure");
+        setRecentErrors(errors);
+      } catch (e) {
+        console.error("Failed to fetch activity", e);
+      }
+    })();
+
     return (): void => {
       removeEventListener("status_update", statusListener);
       removeEventListener("upload_success", successListener);
       removeEventListener("upload_failed", failListener);
+      removeEventListener("activity_update", activityListener);
     };
   }, []);
 
@@ -163,7 +198,16 @@ const Content = (): JSX.Element => {
         {lastUpload && (
           <PanelSectionRow>
             <Field label="Last Upload">
-              {new Date(lastUpload).toLocaleTimeString()}
+              {lastUploadEvent
+                ? `${lastUploadEvent} — ${new Date(lastUpload).toLocaleTimeString()}`
+                : new Date(lastUpload).toLocaleTimeString()}
+            </Field>
+          </PanelSectionRow>
+        )}
+        {!lastUpload && (
+          <PanelSectionRow>
+            <Field label="Last Upload">
+              No uploads yet
             </Field>
           </PanelSectionRow>
         )}
@@ -226,6 +270,41 @@ const Content = (): JSX.Element => {
               ⚠️ Set an uploader ID before uploading
             </Field>
           </PanelSectionRow>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Recent Errors">
+        {recentErrors.length === 0 ? (
+          <PanelSectionRow>
+            <Field>No errors</Field>
+          </PanelSectionRow>
+        ) : (
+          recentErrors.map((entry: ActivityEntry, index: number): JSX.Element => (
+            <PanelSectionRow key={index}>
+              <Field label={entry.event_type}>
+                <div style={{ fontSize: "12px" }}>
+                  <div>{new Date(entry.timestamp).toLocaleTimeString()} — {entry.error_type}</div>
+                  <div>{entry.error_message}{entry.http_status != null ? ` (${String(entry.http_status)})` : ""}</div>
+                </div>
+              </Field>
+            </PanelSectionRow>
+          ))
+        )}
+      </PanelSection>
+
+      <PanelSection title="Recent Activity">
+        {recentActivity.length === 0 ? (
+          <PanelSectionRow>
+            <Field>No activity yet</Field>
+          </PanelSectionRow>
+        ) : (
+          recentActivity.map((entry: ActivityEntry, index: number): JSX.Element => (
+            <PanelSectionRow key={index}>
+              <Field>
+                {entry.outcome === "success" ? "✅" : "❌"} {entry.event_type} — {new Date(entry.timestamp).toLocaleTimeString()}
+              </Field>
+            </PanelSectionRow>
+          ))
         )}
       </PanelSection>
 

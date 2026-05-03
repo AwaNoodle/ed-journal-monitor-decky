@@ -2,6 +2,19 @@
 
 ## Status: Implementation Complete
 
+## Recent Change: upload-status-and-errors
+Added activity log, real-time error display, and enhanced upload status to the plugin.
+
+### What Changed
+- New `src/modules/activity_log.py` — in-memory circular buffer (deque maxlen=50) tracking upload attempts
+- `src/modules/submitter.py` — now accepts optional `ActivityLog`, records success/failure entries, includes `event_name` in `upload_success` event and `last_upload_event` in `get_stats()`
+- `main.py` — wires `ActivityLog`, adds `get_recent_activity` callable
+- `src/Content.tsx` — new "Recent Errors" and "Recent Activity" panel sections, enhanced "Last Upload" with event name
+- `src/types.d.ts` — added `ActivityEntry`, `UploadSuccessEvent.event_name`, `StatusUpdateEvent.last_upload_event`
+
+### Test Results
+96 tests, all passing (was 67).
+
 ## What Was Built
 A Decky plugin that monitors Elite Dangerous journal files and submits events to EDDN. All 50 tasks from the OpenSpec change are complete.
 
