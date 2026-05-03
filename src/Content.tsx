@@ -18,6 +18,8 @@ const findJournalPath = callable<[], FindPathResult>("find_journal_path");
 const setManualJournalPath = callable<[string], SetManualPathResult>("set_journal_path");
 const setEnabled = callable<[boolean], Record<string, unknown>>("set_enabled");
 const setUploaderId = callable<[string], Record<string, unknown>>("set_uploader_id");
+const setDetailedLogging = callable<[boolean], Record<string, unknown>>("set_detailed_logging");
+const createDiagnosticsBundle = callable<[], DiagnosticsResult>("create_diagnostics");
 
 const Content = (): JSX.Element => {
   const [enabled, setEnabledState] = useState(true);
@@ -31,6 +33,8 @@ const Content = (): JSX.Element => {
   const [manualPathInput, setManualPathInput] = useState<string>("");
   const [uploaderIdInput, setUploaderIdInput] = useState<string>("");
   const [pathError, setPathError] = useState<string | null>(null);
+  const [detailedLogging, setDetailedLoggingState] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticsResult | null>(null);
 
   // Load initial status
   useEffect((): void => {
@@ -47,6 +51,7 @@ const Content = (): JSX.Element => {
         const uid = status.uploader_id;
         setUploaderIdState(uid);
         setUploaderIdInput(uid);
+        setDetailedLoggingState(status.detailed_logging);
       } catch (e) {
         console.error("Failed to load status", e);
       }
@@ -116,6 +121,16 @@ const Content = (): JSX.Element => {
       setJournalPath(result.path ?? null);
       setJournalPathSource("auto");
     }
+  };
+
+  const handleDetailedLoggingToggle = async (state: boolean): Promise<void> => {
+    await setDetailedLogging(state);
+    setDetailedLoggingState(state);
+  };
+
+  const handleCreateDiagnostics = async (): Promise<void> => {
+    const result = await createDiagnosticsBundle();
+    setDiagnosticResult(result);
   };
 
   const getStatusText = (): string => {
@@ -209,6 +224,31 @@ const Content = (): JSX.Element => {
           <PanelSectionRow>
             <Field>
               ⚠️ Set an uploader ID before uploading
+            </Field>
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Diagnostics">
+        <PanelSectionRow>
+          <ToggleField
+            label="Detailed Logging"
+            description="Enables DEBUG-level logging for richer diagnostic output"
+            checked={detailedLogging}
+            onChange={(state: boolean): void => { void handleDetailedLoggingToggle(state); }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={(): void => { void handleCreateDiagnostics(); }}>
+            Create Diagnostic Bundle
+          </ButtonItem>
+        </PanelSectionRow>
+        {diagnosticResult && (
+          <PanelSectionRow>
+            <Field label="Bundle">
+              {diagnosticResult.success
+                ? `✅ ${diagnosticResult.path ?? ""} (${String(Math.round((diagnosticResult.size ?? 0) / 1024))} KB)`
+                : `❌ ${diagnosticResult.error ?? "Unknown error"}`}
             </Field>
           </PanelSectionRow>
         )}

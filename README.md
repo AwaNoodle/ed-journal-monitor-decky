@@ -9,6 +9,8 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 - **EDDN submission**: Validates and submits journal events (FSDJump, Scan, Location, Docked, FSSDiscoveryScan) to EDDN
 - **No root access required**: All operations use user-accessible filesystem paths
 - **Steam Deck optimized**: Lightweight polling-based watcher, minimal resource usage
+- **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
+- **Detailed logging toggle**: Increase log verbosity from INFO to DEBUG for richer diagnostic capture
 
 ## Architecture
 

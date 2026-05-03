@@ -47,4 +47,12 @@ interface GetStatusResult {
   fail_count: number;
   last_upload_time: string | null;
   uploader_id: string;
+  detailed_logging: boolean;
+}
+
+interface DiagnosticsResult {
+  success: boolean;
+  path?: string;
+  size?: number;
+  error?: string;
 }

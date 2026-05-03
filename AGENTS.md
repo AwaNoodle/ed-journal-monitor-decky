@@ -23,8 +23,8 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 
 ## Key Files
 - `main.py` — Plugin entry point, wires all backend modules
-- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher)
+- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics)
 - `src/index.tsx` — Frontend: game lifecycle + plugin registration
-- `src/Content.tsx` — Frontend: UI panel
+- `src/Content.tsx` — Frontend: UI panel (status, configuration, diagnostics)
 - `tests/` — All Python tests (run with `PYTHONPATH=. python -m pytest tests/ -v`)
 - `plugin.json` — Decky plugin metadata (no root flag)

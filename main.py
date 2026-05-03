@@ -3,7 +3,10 @@ ED Journal Monitor - Decky Plugin Backend
 Monitors Elite Dangerous journal files and submits events to EDDN.
 """
 
+import logging
+
 import decky
+from src.modules.diagnostics import create_diagnostics as _create_diagnostics
 from src.modules.parser import JournalParser
 from src.modules.path_finder import JournalPathFinder
 from src.modules.settings import PluginSettings
@@ -46,6 +49,14 @@ class Plugin:
             decky.logger.info(f"Journal path found: {journal_path}")
         else:
             decky.logger.info("Journal path not found - will re-scan when ED starts")
+
+        # Apply detailed logging preference on startup
+        detailed_logging = self.settings.get("detailed_logging", False)
+        if detailed_logging:
+            decky.logger.setLevel(logging.DEBUG)
+            decky.logger.info("Detailed logging enabled (DEBUG level)")
+        else:
+            decky.logger.setLevel(logging.INFO)
 
         decky.logger.info("ED Journal Monitor started successfully")
 
@@ -117,6 +128,7 @@ class Plugin:
             "journal_path_source": self.settings.get("journal_path_source") if self.settings else None,
             "uploader_id": uploader_id,
             "enabled": self.settings.get("enabled", True) if self.settings else True,
+            "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
             **stats,
         }
 
@@ -131,3 +143,22 @@ class Plugin:
         if not enabled and self.watcher and self.watcher.is_running:
             await self.watcher.stop()
         return {"success": True, "enabled": enabled}
+
+    async def set_detailed_logging(self, enabled: bool) -> dict:
+        """Set detailed logging (DEBUG) on or off (INFO). Persists to settings."""
+        if enabled:
+            decky.logger.setLevel(logging.DEBUG)
+            decky.logger.debug("Detailed logging enabled")
+        else:
+            decky.logger.setLevel(logging.INFO)
+            decky.logger.info("Detailed logging disabled")
+        await self.settings.set("detailed_logging", enabled)
+        return {"success": True, "detailed_logging": enabled}
+
+    async def create_diagnostics(self) -> dict:
+        """Create a diagnostic bundle zip file."""
+        return _create_diagnostics(
+            settings=self.settings,
+            watcher=self.watcher,
+            submitter=self.submitter,
+        )
