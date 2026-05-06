@@ -52,6 +52,7 @@ interface FindPathResult {
 }
 
 interface GetStatusResult {
+  ed_running: boolean;
   enabled: boolean;
   watcher_running: boolean;
   journal_path: string | null;
@@ -69,4 +70,8 @@ interface DiagnosticsResult {
   path?: string;
   size?: number;
   error?: string;
+}
+
+interface EdStateChangeEvent {
+  ed_running: boolean;
 }

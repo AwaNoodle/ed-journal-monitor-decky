@@ -27,6 +27,7 @@ class Plugin:
         self.activity_log: ActivityLog | None = None
         self.submitter: EDDNSubmitter | None = None
         self.watcher: JournalWatcher | None = None
+        self.ed_running: bool = False
 
     async def _main(self) -> None:
         decky.logger.info("ED Journal Monitor starting...")
@@ -128,6 +129,7 @@ class Plugin:
             stats = self.submitter.get_stats()
 
         return {
+            "ed_running": self.ed_running,
             "watcher_running": is_running,
             "journal_path": journal_path,
             "journal_path_source": self.settings.get("journal_path_source") if self.settings else None,
@@ -161,7 +163,25 @@ class Plugin:
         await self.settings.set("detailed_logging", enabled)
         return {"success": True, "detailed_logging": enabled}
 
-    async def create_diagnostics(self) -> dict:
+    async def set_ed_running(self, enabled: bool) -> dict:
+        """Set the ED running state. Emits ed_state_change event if state changes."""
+        if enabled == self.ed_running:
+            return {"success": True}
+        self.ed_running = enabled
+        await decky.emit("ed_state_change", {"ed_running": enabled})
+        return {"success": True}
+
+    async def check_ed_running(self) -> dict:
+        """Check if ED appears to be already running (e.g. started before plugin loaded)."""
+        if not self.path_finder:
+            return {"running": False, "reason": "path_finder not initialized"}
+
+        # First, try to find journal path if we don't have one
+        if not self.settings.get("journal_path"):
+            await self.path_finder.find_journal_path()
+
+        running = self.path_finder.is_ed_likely_running()
+        return {"running": running}
         """Create a diagnostic bundle zip file."""
         return _create_diagnostics(
             settings=self.settings,

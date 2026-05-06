@@ -25,6 +25,7 @@ const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("get_rec
 const Content = (): JSX.Element => {
   const [enabled, setEnabledState] = useState(true);
   const [watcherRunning, setWatcherRunning] = useState(false);
+  const [edRunning, setEdRunning] = useState(false);
   const [journalPath, setJournalPath] = useState<string | null>(null);
   const [journalPathSource, setJournalPathSource] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState(0);
@@ -47,6 +48,7 @@ const Content = (): JSX.Element => {
         const status = await getStatus();
         setEnabledState(status.enabled);
         setWatcherRunning(status.watcher_running);
+        setEdRunning(status.ed_running);
         setJournalPath(status.journal_path);
         setJournalPathSource(status.journal_path_source);
         setSuccessCount(status.success_count);
@@ -71,6 +73,10 @@ const Content = (): JSX.Element => {
       setFailCount(data.fail_count);
       setLastUpload(data.last_upload_time);
       setLastUploadEvent(data.last_upload_event);
+    });
+
+    const edStateListener = addEventListener("ed_state_change", (data: EdStateChangeEvent): void => {
+      setEdRunning(data.ed_running);
     });
 
     const successListener = addEventListener("upload_success", (data: UploadSuccessEvent): void => {
@@ -111,6 +117,7 @@ const Content = (): JSX.Element => {
 
     return (): void => {
       removeEventListener("status_update", statusListener);
+      removeEventListener("ed_state_change", edStateListener);
       removeEventListener("upload_success", successListener);
       removeEventListener("upload_failed", failListener);
       removeEventListener("activity_update", activityListener);
@@ -168,11 +175,15 @@ const Content = (): JSX.Element => {
     setDiagnosticResult(result);
   };
 
-  const getStatusText = (): string => {
-    if (!enabled) return "⚪ Disabled";
-    if (!journalPath) return "🔍 Journal path not found";
-    if (watcherRunning) return "🟢 Watching — uploading journal events";
-    return "⚪ Idle — waiting for Elite Dangerous";
+  const getEdStatusText = (): string => {
+    return edRunning ? "🟢 Running" : "⚪ Not Running";
+  };
+
+  const getJournalStatusText = (): string => {
+    if (!journalPath) return "🔍 Not Found";
+    if (watcherRunning) return "🟢 Watching & Uploading";
+    // Journal path found but not watching
+    return edRunning ? "⚠️ Found, Not Watching" : "📂 Found";
   };
 
   return (
@@ -186,8 +197,13 @@ const Content = (): JSX.Element => {
           />
         </PanelSectionRow>
         <PanelSectionRow>
-          <Field label="Status">
-            {getStatusText()}
+          <Field label="ED Status">
+            {getEdStatusText()}
+          </Field>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Field label="Journal Status">
+            {getJournalStatusText()}
           </Field>
         </PanelSectionRow>
         <PanelSectionRow>

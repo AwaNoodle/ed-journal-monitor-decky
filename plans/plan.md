@@ -2,7 +2,22 @@
 
 ## Status: Implementation Complete
 
-## Recent Change: upload-status-and-errors
+## Recent Change: already-running-game-detection
+Fixed bug where ED was not detected if already running when the plugin loaded.
+
+### What Changed
+- `src/modules/path_finder.py` — Added `is_ed_likely_running()` method that checks for journal files modified within the last 5 minutes
+- `main.py` — Added `check_ed_running` callable that probes backend for already-running ED
+- `src/index.tsx` — Added startup probe: after registering lifecycle listeners, calls `check_ed_running()` and triggers watcher start if ED is already running
+- `tests/test_ed_already_running.py` — 13 new tests covering `is_ed_likely_running()` and `check_ed_running`
+
+### Root Cause
+`RegisterForAppLifetimeNotifications` only fires on state changes. If ED was already running when the plugin loaded (Decky restart, plugin update, Steam Deck reboot), no notification was fired and ED went undetected.
+
+### Test Results
+117 tests, all passing (was 104).
+
+## Previous Change: upload-status-and-errors
 Added activity log, real-time error display, and enhanced upload status to the plugin.
 
 ### What Changed

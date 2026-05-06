@@ -7,6 +7,7 @@ Auto-discovers the ED journal directory by scanning Steam library configuration.
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from src.modules.settings import PluginSettings
 
 ED_APPID = "359320"
+_ED_RUNNING_THRESHOLD_SECS = 300  # 5 minutes
 
 
 class JournalPathFinder:
@@ -58,6 +60,36 @@ class JournalPathFinder:
                 return found_path
 
         return None
+
+    def is_ed_likely_running(self) -> bool:
+        """Check if ED appears to be running by looking for a recently-modified journal file.
+
+        If we have a valid journal path with a file modified within the last 5 minutes,
+        ED is likely running. This is used to detect ED that was already running
+        when the plugin loaded (since RegisterForAppLifetimeNotifications only
+        fires on state changes).
+        """
+        journal_path = self.settings.get("journal_path")
+        if not journal_path:
+            return False
+
+        try:
+            journal_dir = Path(journal_path)
+            if not journal_dir.is_dir():
+                return False
+
+            now = time.time()
+            for f in journal_dir.glob("Journal*.log"):
+                try:
+                    if now - f.stat().st_mtime < _ED_RUNNING_THRESHOLD_SECS:
+                        decky.logger.info(f"Journal file recently modified, ED likely running: {f.name}")
+                        return True
+                except OSError:
+                    continue
+        except (OSError, ValueError):
+            return False
+
+        return False
 
     async def set_manual_path(self, path: str) -> dict:
         """Set a manually configured journal path after validating it."""
