@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "rollup -c",
-    "package": "npm run build && rm -f ed-journal-monitor.zip && zip -r ed-journal-monitor.zip main.py plugin.json dist/index.js src/modules/",
+    "package": "npm run build && rm -rf out && mkdir -p out/ed-journal-monitor/dist out/ed-journal-monitor/bin && cp plugin.json main.py package.json LICENSE README.md out/ed-journal-monitor/ && cp dist/index.js out/ed-journal-monitor/dist/ && cp -r src/modules out/ed-journal-monitor/bin/ && cd out && zip -r ../ed-journal-monitor.zip ed-journal-monitor && cd .. && rm -rf out",
     "watch": "rollup -c -w",
     "test": ".venv/bin/python -m pytest tests/ -v",
     "lint:ts": "tsc --noEmit -p tsconfig.json && eslint src/",
@@ -27,7 +27,7 @@
   "license": "MIT",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
-    "@decky/ui": "^4.11.0",
+    "@decky/ui": "^4.11.3",
     "@eslint/js": "^10.0.1",
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
