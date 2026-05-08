@@ -2,7 +2,29 @@
 
 ## Status: Implementation Complete
 
-## Recent Change: already-running-game-detection
+## Recent Change: fix-plugin-import-path-and-game-detection
+Fixed plugin failing to start on-device (ModuleNotFoundError) and improved ED game detection.
+
+### What Changed
+- `main.py` — Added `sys.path` manipulation so `from src.modules...` resolves when Decky deploys to `bin/src/modules/`; fixed broken `create_diagnostics` method; added `Optional` type compat
+- `package.json` — Fixed package script: `cp -r src/modules out/.../bin/` → `cp -r src/modules out/.../bin/src/` to match import paths
+- `src/index.tsx` — Removed custom `declare const SteamClient` that shadowed `@decky/ui` global; added diagnostic logging for all `AppLifetimeNotification` events; added registration success/failure logging
+- `src/modules/path_finder.py` — Added `_check_ed_process()` scanning `/proc/*/comm` for ED processes; `is_ed_likely_running()` now checks process list first, falls back to journal mtime; fixed process name detection (kernel truncates `/proc/PID/comm` to 15 chars, so `EliteDangerous64` → `EliteDangerous6`)
+- `tests/test_path_finder_process.py` — 8 new tests for process-based detection
+
+### Root Cause (Primary)
+Plugin never started on-device. The `package` script deployed modules to `bin/modules/` but `main.py` imported `from src.modules...`. Every startup failed with `ModuleNotFoundError: No module named 'src'`.
+
+### Root Cause (Secondary)
+`/proc/PID/comm` truncates to 15 chars. The detection code looked for `EliteDangerous64` (16 chars) which never matched the actual comm value `EliteDangerous6`.
+
+### Test Results
+125 tests, all passing (was 117).
+
+### On-Device Verification
+Plugin now starts successfully, detects ED via /proc scan, finds journal path via VDF scan. SSL cert issue discovered (separate problem).
+
+## Previous Change: already-running-game-detection
 Fixed bug where ED was not detected if already running when the plugin loaded.
 
 ### What Changed

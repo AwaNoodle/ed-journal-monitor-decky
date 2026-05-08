@@ -18,6 +18,7 @@ class SessionState:
     odyssey: bool = True
     game_version: str = ""
     game_build: str = ""
+    commander: str = ""
 
 
 @dataclass
@@ -75,6 +76,9 @@ class JournalParser:
         self.session_state.game_build = data.get("build", "")
 
     def _handle_loadgame(self, data: dict) -> None:
-        """Extract horizons/odyssey flags from LoadGame event."""
+        """Extract commander name, horizons/odyssey flags from LoadGame event."""
         self.session_state.horizons = data.get("Horizons", True)
         self.session_state.odyssey = data.get("Odyssey", True)
+        commander = data.get("Commander", "")
+        if commander:
+            self.session_state.commander = commander

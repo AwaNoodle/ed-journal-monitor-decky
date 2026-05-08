@@ -6,15 +6,6 @@ import { staticClasses } from "@decky/ui";
 import { FaSatelliteDish } from "react-icons/fa";
 import Content from "./Content";
 
-declare const SteamClient: {
-  GameSessions: {
-    RegisterForAppLifetimeNotifications(cb: (data: { unAppID: number; bRunning: boolean }) => void): { unregister(): void };
-  } | undefined;
-  System: {
-    RegisterForOnResumeFromSuspend(cb: () => void): { unregister(): void };
-  } | undefined;
-} | undefined;
-
 // Backend callables
 const startWatcher = callable<[], Record<string, unknown>>("start_watcher");
 const stopWatcher = callable<[], Record<string, unknown>>("stop_watcher");
@@ -30,7 +21,10 @@ export default definePlugin(() => {
   console.log("ED Journal Monitor initializing...");
 
   // Handle ED game start
-  const handleAppStart = async (data: { unAppID: number; bRunning: boolean }): Promise<void> => {
+  const handleAppStart = async (data: { unAppID: number; bRunning: boolean; nInstanceID?: number }): Promise<void> => {
+    // Log all app lifecycle events for debugging
+    console.log(`AppLifetimeNotification: appID=${String(data.unAppID)}, running=${String(data.bRunning)}, instanceID=${String(data.nInstanceID)}`);
+
     if (data.unAppID !== ED_APP_ID) return;
 
     if (data.bRunning) {
@@ -100,10 +94,16 @@ export default definePlugin(() => {
   let resumeRegistration: { unregister(): void } | null = null;
 
   try {
-    if (SteamClient?.GameSessions) {
-      lifetimeRegistration = SteamClient.GameSessions.RegisterForAppLifetimeNotifications(
+    // SteamClient is declared as always-defined by @decky/ui but may be
+    // unavailable at runtime on some SteamOS versions.
+    const gameSessions = (SteamClient as unknown as Record<string, unknown>).GameSessions as
+      typeof SteamClient.GameSessions | undefined;
+    if (gameSessions) {
+      console.log("Registering for AppLifetimeNotifications...");
+      lifetimeRegistration = gameSessions.RegisterForAppLifetimeNotifications(
         (data): void => { void handleAppStart(data); },
       );
+      console.log("AppLifetimeNotifications registered successfully");
     } else {
       console.warn("SteamClient.GameSessions not available, game lifecycle detection disabled");
     }
@@ -112,8 +112,12 @@ export default definePlugin(() => {
   }
 
   try {
-    if (SteamClient?.System) {
-      resumeRegistration = SteamClient.System.RegisterForOnResumeFromSuspend((): void => { void handleResume(); });
+    const system = (SteamClient as unknown as Record<string, unknown>).System as
+      typeof SteamClient.System | undefined;
+    if (system) {
+      console.log("Registering for OnResumeFromSuspend...");
+      resumeRegistration = system.RegisterForOnResumeFromSuspend((): void => { void handleResume(); });
+      console.log("OnResumeFromSuspend registered successfully");
     } else {
       console.warn("SteamClient.System not available, suspend/resume handling disabled");
     }

@@ -6,16 +6,25 @@ Monitors Elite Dangerous journal files and submits events to EDDN.
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 
 import decky
-from src.modules.activity_log import ActivityLog
-from src.modules.diagnostics import create_diagnostics as _create_diagnostics
-from src.modules.parser import JournalParser
-from src.modules.path_finder import JournalPathFinder
-from src.modules.settings import PluginSettings
-from src.modules.submitter import EDDNSubmitter
-from src.modules.validator import EDDNValidator
-from src.modules.watcher import JournalWatcher
+
+# Decky deploys modules to bin/src/modules/ but runs main.py from the plugin root.
+# Add bin/ to sys.path so that `from src.modules...` imports resolve.
+_bin_dir = Path(__file__).parent / "bin"
+if str(_bin_dir) not in sys.path:
+    sys.path.insert(0, str(_bin_dir))
+
+from src.modules.activity_log import ActivityLog  # noqa: E402
+from src.modules.diagnostics import create_diagnostics as _create_diagnostics  # noqa: E402
+from src.modules.parser import JournalParser  # noqa: E402
+from src.modules.path_finder import JournalPathFinder  # noqa: E402
+from src.modules.settings import PluginSettings  # noqa: E402
+from src.modules.submitter import EDDNSubmitter  # noqa: E402
+from src.modules.validator import EDDNValidator  # noqa: E402
+from src.modules.watcher import JournalWatcher  # noqa: E402
 
 
 class Plugin:
@@ -182,6 +191,8 @@ class Plugin:
 
         running = self.path_finder.is_ed_likely_running()
         return {"running": running}
+
+    async def create_diagnostics(self) -> dict:
         """Create a diagnostic bundle zip file."""
         return _create_diagnostics(
             settings=self.settings,
@@ -189,7 +200,9 @@ class Plugin:
             submitter=self.submitter,
         )
 
-    async def get_recent_activity(self, limit: int = 50, outcome: str | None = None) -> list[dict]:
+    async def get_recent_activity(
+        self, limit: int = 50, outcome: str | None = None,
+    ) -> list[dict]:
         """Get recent activity log entries."""
         if not self.activity_log:
             return []

@@ -160,6 +160,10 @@ class JournalWatcher:
             if not event:
                 continue
 
+            # Auto-detect commander name from LoadGame for uploader ID
+            if event.event_type == "LoadGame" and self.parser.session_state.commander:
+                await decky.emit("commander_detected", {"commander": self.parser.session_state.commander})
+
             if self.parser.is_reportable(event):
                 await self._process_reportable_event(event)
 

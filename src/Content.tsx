@@ -103,6 +103,17 @@ const Content = (): JSX.Element => {
       }
     });
 
+    // Auto-detect commander name from LoadGame for uploader ID
+    const commanderListener = addEventListener("commander_detected", (data: { commander: string }): void => {
+      if (data.commander && !uploaderId) {
+        void (async (): Promise<void> => {
+          await setUploaderId(data.commander);
+          setUploaderIdState(data.commander);
+          setUploaderIdInput(data.commander);
+        })();
+      }
+    });
+
     // Fetch initial activity
     void (async (): Promise<void> => {
       try {
@@ -121,6 +132,7 @@ const Content = (): JSX.Element => {
       removeEventListener("upload_success", successListener);
       removeEventListener("upload_failed", failListener);
       removeEventListener("activity_update", activityListener);
+      removeEventListener("commander_detected", commanderListener);
     };
   }, []);
 
@@ -233,7 +245,7 @@ const Content = (): JSX.Element => {
         {journalPath && (
           <PanelSectionRow>
             <Field label="Journal Path">
-              {journalPath}
+              {journalPath.length > 40 ? journalPath.slice(0, 18) + '…' + journalPath.slice(-18) : journalPath}
             </Field>
           </PanelSectionRow>
         )}
@@ -283,7 +295,7 @@ const Content = (): JSX.Element => {
         {!uploaderId && (
           <PanelSectionRow>
             <Field>
-              ⚠️ Set an uploader ID before uploading
+              ⚠️ Uploader ID will be auto-set from your CMDR name when ED loads a game session
             </Field>
           </PanelSectionRow>
         )}

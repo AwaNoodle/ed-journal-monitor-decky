@@ -62,13 +62,21 @@ class JournalPathFinder:
         return None
 
     def is_ed_likely_running(self) -> bool:
-        """Check if ED appears to be running by looking for a recently-modified journal file.
+        """Check if ED appears to be running.
 
-        If we have a valid journal path with a file modified within the last 5 minutes,
-        ED is likely running. This is used to detect ED that was already running
-        when the plugin loaded (since RegisterForAppLifetimeNotifications only
-        fires on state changes).
+        Uses two detection methods:
+        1. Check /proc for ED process names (most reliable)
+        2. Check for recently-modified journal files (fallback)
+
+        This is used to detect ED that was already running when the plugin loaded
+        (since RegisterForAppLifetimeNotifications only fires on state changes).
         """
+        # Method 1: Process-based detection
+        if self._check_ed_process():
+            decky.logger.info("ED process detected via /proc scan")
+            return True
+
+        # Method 2: Journal file mtime heuristic
         journal_path = self.settings.get("journal_path")
         if not journal_path:
             return False
@@ -89,6 +97,32 @@ class JournalPathFinder:
         except (OSError, ValueError):
             return False
 
+        return False
+
+    def _check_ed_process(self) -> bool:
+        """Check /proc for running Elite Dangerous processes.
+
+        ED runs as 'EliteDangerous64.exe' under Proton, or potentially
+        as 'EliteDangerous.exe'. We scan /proc/*/comm for these names.
+        """
+        ed_process_names = {
+        "EliteDangerous6", "EliteDangerous64", "EliteDangerous64.exe",
+        "WatchDog64", "WatchDog64.exe",
+        "EDLaunch", "EDLaunch.exe",
+    }
+        try:
+            proc = Path("/proc")
+            for pid_dir in proc.iterdir():
+                if not pid_dir.name.isdigit():
+                    continue
+                try:
+                    comm = (pid_dir / "comm").read_text().strip()
+                    if comm in ed_process_names:
+                        return True
+                except (OSError, PermissionError):
+                    continue
+        except OSError:
+            return False
         return False
 
     async def set_manual_path(self, path: str) -> dict:
