@@ -104,12 +104,19 @@ class JournalPathFinder:
 
         ED runs as 'EliteDangerous64.exe' under Proton, or potentially
         as 'EliteDangerous.exe'. We scan /proc/*/comm for these names.
+
+        Note: /proc/PID/comm is kernel-truncated to 15 chars, so
+        EliteDangerous64 may appear as EliteDangerous6.
         """
         ed_process_names = {
-        "EliteDangerous6", "EliteDangerous64", "EliteDangerous64.exe",
-        "WatchDog64", "WatchDog64.exe",
-        "EDLaunch", "EDLaunch.exe",
-    }
+            "EliteDangerous6",
+            "EliteDangerous64",
+            "EliteDangerous64.exe",
+            "WatchDog64",
+            "WatchDog64.exe",
+            "EDLaunch",
+            "EDLaunch.exe",
+        }
         try:
             proc = Path("/proc")
             for pid_dir in proc.iterdir():

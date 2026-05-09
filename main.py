@@ -133,9 +133,14 @@ class Plugin:
         journal_path = self.settings.get("journal_path") if self.settings else None
         uploader_id = self.settings.get("uploader_id") if self.settings else None
 
-        stats = {}
+        stats = {
+            "success_count": 0,
+            "fail_count": 0,
+            "last_upload_time": None,
+            "last_upload_event": None,
+        }
         if self.submitter:
-            stats = self.submitter.get_stats()
+            stats.update(self.submitter.get_stats())
 
         return {
             "ed_running": self.ed_running,
@@ -145,7 +150,6 @@ class Plugin:
             "uploader_id": uploader_id,
             "enabled": self.settings.get("enabled", True) if self.settings else True,
             "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
-            "last_upload_event": stats.get("last_upload_event"),
             **stats,
         }
 

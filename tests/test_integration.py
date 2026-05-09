@@ -4,10 +4,11 @@ Tests the full pipeline: watcher → parser → validator → submitter.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from main import Plugin
 from src.modules.activity_log import ActivityLog
 from src.modules.parser import JournalParser
 from src.modules.submitter import EDDNSubmitter
@@ -180,25 +181,24 @@ class TestEndToEndPipeline:
         assert len(submitted_messages) == 0
 
     @pytest.mark.asyncio
-    async def test_start_watcher_blocked_when_disabled(self, tmp_path):
-        """When enabled=False, start_watcher should refuse to start."""
+    async def test_start_watcher_blocked_when_disabled(self):
+        """Plugin.start_watcher returns disabled error when enabled=False."""
+        plugin = Plugin()
         settings = MockSettings()
         settings._data["enabled"] = False
-        parser = JournalParser()
-        validator = EDDNValidator()
-        submitter = EDDNSubmitter(settings)
-        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
 
-        # Create a valid journal dir so path validation passes
-        journal_dir = tmp_path / "journals"
-        journal_dir.mkdir()
-        (journal_dir / "Journal.2026-01-12T120000.01.log").write_text("{}")
+        plugin.settings = settings
+        plugin.watcher = MagicMock()
+        plugin.watcher.is_running = False
+        plugin.watcher.start = AsyncMock()
+        plugin.path_finder = MagicMock()
+        plugin.path_finder.find_journal_path = AsyncMock(return_value="/tmp/journals")
 
-        # Attempt to start watcher while disabled
-        await watcher.start(str(journal_dir))
+        result = await plugin.start_watcher()
 
-        # Watcher should NOT be running
-        assert not watcher.is_running
+        assert result == {"success": False, "error": "Monitor is disabled"}
+        plugin.path_finder.find_journal_path.assert_not_called()
+        plugin.watcher.start.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_recent_activity_after_simulated_uploads(self, tmp_path):
