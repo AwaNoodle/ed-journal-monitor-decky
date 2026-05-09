@@ -25,11 +25,14 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Typecheck frontend
-        run: npx tsc --noEmit
+      - name: Lint + typecheck frontend
+        run: npm run lint:ts
 
       - name: Install Python dependencies
-        run: pip install pytest pytest-asyncio
+        run: pip install ruff pytest pytest-asyncio
+
+      - name: Lint backend
+        run: ruff check src/modules/ tests/
 
       - name: Run Python tests
         run: PYTHONPATH=. python -m pytest tests/ -v

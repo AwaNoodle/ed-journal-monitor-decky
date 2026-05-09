@@ -103,6 +103,13 @@ source .venv/bin/activate
 PYTHONPATH=. python -m pytest tests/ -v
 ```
 
+### Lint / Typecheck
+
+```bash
+npm run lint:ts
+npm run lint:py
+```
+
 ## EDDN Event Coverage
 
 ### Currently Supported (journal/1 schema)

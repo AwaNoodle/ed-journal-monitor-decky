@@ -2,6 +2,25 @@
 
 ## Status: Implementation Complete
 
+## Recent Change: reviewer-followups-correctness-tests-cleanup
+Implemented reviewer follow-ups for correctness, test robustness, and cleanup.
+
+### What Changed
+- `src/api.ts` — New shared frontend RPC callables/types wrapper used by UI and lifecycle code
+- `src/index.tsx` + `src/Content.tsx` — Switched to shared API module; improved resume comment accuracy; replaced unstable list index keys with stable activity keys
+- `main.py` — Removed redundant `last_upload_event` assignment in `get_status()` payload
+- `src/modules/path_finder.py` — Cleaned process-name set formatting and documented `/proc/*/comm` truncation behavior
+- `tests/test_integration.py` — Replaced watcher-level disabled test with plugin-level `Plugin.start_watcher()` contract test
+- `tests/test_ed_already_running.py` — Made mtime boundary tests deterministic by patching `time.time`
+- `tests/test_path_finder_process.py` — Simplified process-detection tests with focused fake `/proc` entries (less brittle mocking)
+- `.github/workflows/ci.yml` — CI now runs frontend lint/typecheck and backend ruff lint + pytest
+- `AGENTS.md` — Updated test count metadata to 126
+- `README.md` — Added lint/typecheck commands in development docs
+
+### Verification
+- `npm run lint:ts`
+- `PYTHONPATH=. .venv/bin/python -m pytest tests/ -v`
+
 ## Recent Change: fix-plugin-import-path-and-game-detection
 Fixed plugin failing to start on-device (ModuleNotFoundError) and improved ED game detection.
 

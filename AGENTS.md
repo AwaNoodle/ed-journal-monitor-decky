@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (117 tests, all passing)
+- Tests: pytest + pytest-asyncio (126 tests, all passing)
 
 ## Architecture
 - Frontend detects ED start/stop via SteamClient.GameSessions.RegisterForAppLifetimeNotifications
