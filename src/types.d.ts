@@ -41,6 +41,38 @@ interface ActivityEntry {
   http_status: number | null;
 }
 
+interface BasicSuccessResult {
+  success: boolean;
+  error?: string;
+}
+
+interface StartWatcherResult {
+  success: boolean;
+  status?: string;
+  error?: string;
+  journal_path?: string;
+}
+
+interface StopWatcherResult {
+  success: boolean;
+  status?: string;
+  error?: string;
+}
+
+interface SetEnabledResult {
+  success: boolean;
+  enabled?: boolean;
+  error?: string;
+}
+
+type SetUploaderIdResult = BasicSuccessResult;
+
+interface SetDetailedLoggingResult {
+  success: boolean;
+  detailed_logging?: boolean;
+  error?: string;
+}
+
 interface SetManualPathResult {
   success: boolean;
   error?: string;

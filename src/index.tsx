@@ -1,18 +1,15 @@
-import {
-  definePlugin,
-  callable,
-} from "@decky/api";
+import { definePlugin } from "@decky/api";
 import { staticClasses } from "@decky/ui";
 import { FaSatelliteDish } from "react-icons/fa";
 import Content from "./Content";
-
-// Backend callables
-const startWatcher = callable<[], Record<string, unknown>>("start_watcher");
-const stopWatcher = callable<[], Record<string, unknown>>("stop_watcher");
-const findJournalPath = callable<[], FindPathResult>("find_journal_path");
-const getStatus = callable<[], GetStatusResult>("get_status");
-const setEdRunning = callable<[boolean], Record<string, unknown>>("set_ed_running");
-const checkEdRunning = callable<[], { running: boolean; reason?: string }>("check_ed_running");
+import {
+  checkEdRunning,
+  findJournalPath,
+  getStatus,
+  setEdRunning,
+  startWatcher,
+  stopWatcher,
+} from "./api";
 
 // Elite Dangerous Steam AppID
 const ED_APP_ID = 359320;
@@ -80,7 +77,7 @@ export default definePlugin(() => {
         // Watcher was running before suspend but is now disabled
         await stopWatcher();
       }
-      // If ED is still running and watcher should be active, do a catch-up poll
+      // If ED is still running and watcher should be active, log resume state.
       if (status.enabled && status.watcher_running) {
         console.log("Resuming watcher after suspend");
       }

@@ -7,20 +7,20 @@ import {
   ButtonItem,
   TextField,
 } from "@decky/ui";
-import { callable, addEventListener, removeEventListener } from "@decky/api";
+import { addEventListener, removeEventListener } from "@decky/api";
 import type { JSX } from "react";
-
-// Backend callables
-const getStatus = callable<[], GetStatusResult>("get_status");
-const startWatcher = callable<[], Record<string, unknown>>("start_watcher");
-const stopWatcher = callable<[], Record<string, unknown>>("stop_watcher");
-const findJournalPath = callable<[], FindPathResult>("find_journal_path");
-const setManualJournalPath = callable<[string], SetManualPathResult>("set_journal_path");
-const setEnabled = callable<[boolean], Record<string, unknown>>("set_enabled");
-const setUploaderId = callable<[string], Record<string, unknown>>("set_uploader_id");
-const setDetailedLogging = callable<[boolean], Record<string, unknown>>("set_detailed_logging");
-const createDiagnosticsBundle = callable<[], DiagnosticsResult>("create_diagnostics");
-const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("get_recent_activity");
+import {
+  createDiagnosticsBundle,
+  findJournalPath,
+  getRecentActivity,
+  getStatus,
+  setDetailedLogging,
+  setEnabled,
+  setManualJournalPath,
+  setUploaderId,
+  startWatcher,
+  stopWatcher,
+} from "./api";
 
 const Content = (): JSX.Element => {
   const [enabled, setEnabledState] = useState(true);
@@ -198,6 +198,11 @@ const Content = (): JSX.Element => {
     return edRunning ? "⚠️ Found, Not Watching" : "📂 Found";
   };
 
+  const getActivityKey = (entry: ActivityEntry): string => {
+    const status = entry.http_status != null ? String(entry.http_status) : "na";
+    return `${entry.timestamp}-${entry.event_type}-${entry.outcome}-${status}`;
+  };
+
   return (
     <div>
       <PanelSection title="Status">
@@ -307,8 +312,8 @@ const Content = (): JSX.Element => {
             <Field>No errors</Field>
           </PanelSectionRow>
         ) : (
-          recentErrors.map((entry: ActivityEntry, index: number): JSX.Element => (
-            <PanelSectionRow key={index}>
+          recentErrors.map((entry: ActivityEntry): JSX.Element => (
+            <PanelSectionRow key={getActivityKey(entry)}>
               <Field label={entry.event_type}>
                 <div style={{ fontSize: "12px" }}>
                   <div>{new Date(entry.timestamp).toLocaleTimeString()} — {entry.error_type}</div>
@@ -326,8 +331,8 @@ const Content = (): JSX.Element => {
             <Field>No activity yet</Field>
           </PanelSectionRow>
         ) : (
-          recentActivity.map((entry: ActivityEntry, index: number): JSX.Element => (
-            <PanelSectionRow key={index}>
+          recentActivity.map((entry: ActivityEntry): JSX.Element => (
+            <PanelSectionRow key={getActivityKey(entry)}>
               <Field>
                 {entry.outcome === "success" ? "✅" : "❌"} {entry.event_type} — {new Date(entry.timestamp).toLocaleTimeString()}
               </Field>
