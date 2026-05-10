@@ -152,3 +152,8 @@ Extend the ED Journal Monitor Decky plugin to send the same EDDN data that EDMC 
   - **Inlined `validate_auxiliary()`** — was a one-liner set membership check
   - **Added edge-case tests**: empty commodities/modules/ships, invalid JSON through watcher, Docked not triggering auxiliary, NavRoute empty route, `_as_dict_list` unit tests, commodity[1] content verification
   - 182 tests passing, all lint clean
+
+## Documentation Review (2026-05-10)
+- Reviewed README.md and AGENTS.md for accuracy against codebase
+- **README.md fixes**: Added NavRoute to auxiliary table, added missing architecture diagram nodes (Activity log, Diagnostics, Constants), added directional arrows (callable vs decky.emit), added full Configuration section (enabled, detailed_logging, uploader_id auto-detection, poll_interval, all settings table), added EDDN upload endpoint, added UI Panel description, added Event Flow walkthrough, added Emitted Events table, added Troubleshooting section (SSL certs, journal path, EDDN failures, ED detection, system resume), added Known Limitations section, added Diagnostic Bundle contents table, softened "no manual setup required" to "for Steam installs", added Proton username note, aligned test command with package.json
+- **AGENTS.md fixes**: Added RegisterForOnResumeFromSuspend and check_ed_running to architecture description, added full callable methods list, added emitted events list, added constants.py to module list, added api.ts and types.d.ts to key files, updated Content.tsx description to include all 5 panel sections, aligned test command
