@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (205 tests, all passing)
+- Tests: pytest + pytest-asyncio (330 tests, all passing)
 - Known on-device issue: Decky Loader's PyInstaller-embedded Python 3.11 can't find system SSL certs; submitter uses `_build_ssl_context()` with explicit CA bundle cascade (env → certifi → system paths)
 
 ## Architecture
@@ -30,7 +30,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 
 ## Key Files
 - `main.py` — Plugin entry point, wires all backend modules
-- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics, activity_log, constants)
+- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics, activity_log, constants, signal_batcher)
 - `src/api.ts` — Defines all 12 callable frontend→backend methods
 - `src/types.d.ts` — TypeScript type definitions for callable results and emitted event payloads
 - `src/index.tsx` — Frontend: game lifecycle + plugin registration

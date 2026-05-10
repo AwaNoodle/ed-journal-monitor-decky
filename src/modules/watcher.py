@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decky
-from src.modules.constants import AUXILIARY_FILES
+from src.modules.constants import AUXILIARY_FILES, DEDICATED_SCHEMA_EVENTS
 
 if TYPE_CHECKING:
     from src.modules.parser import JournalParser, ParsedEvent
     from src.modules.settings import PluginSettings
+    from src.modules.signal_batcher import SignalBatcher
     from src.modules.submitter import EDDNSubmitter
     from src.modules.validator import EDDNValidator
 
@@ -32,11 +33,13 @@ class JournalWatcher:
         parser: JournalParser,
         validator: EDDNValidator,
         submitter: EDDNSubmitter,
+        signal_batcher: SignalBatcher | None = None,
     ) -> None:
         self.settings = settings
         self.parser = parser
         self.validator = validator
         self.submitter = submitter
+        self._signal_batcher = signal_batcher or self._create_batcher()
         self.is_running = False
 
         self._journal_path: str | None = None
@@ -44,6 +47,11 @@ class JournalWatcher:
         self._poll_task: asyncio.Task | None = None
         self._file_positions: dict[str, int] = {}  # filepath -> last line number
         self._known_files: set[str] = set()
+
+    @staticmethod
+    def _create_batcher() -> SignalBatcher:
+        from src.modules.signal_batcher import SignalBatcher  # noqa: PLC0415
+        return SignalBatcher()
 
     async def start(self, journal_path: str) -> None:
         """Start the polling watcher."""
@@ -185,40 +193,88 @@ class JournalWatcher:
                 decky.logger.error(f"Error processing event in {filepath}: {e}")
 
     async def _process_reportable_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
-        """Validate and submit a reportable event."""
-        event_to_validate = event
-        message: dict | None = None
-        is_auxiliary = event.event_type in AUXILIARY_FILES
+        """Validate and submit a reportable event with schema-aware routing."""
+        event_type = event.event_type
 
-        if is_auxiliary:
-            auxiliary_info = AUXILIARY_FILES[event.event_type]
-            auxiliary_filename = auxiliary_info["filename"]
-            auxiliary_schema = auxiliary_info["schema"]
+        # 1. FSSSignalDiscovered → batch (not immediate submit)
+        if event_type == "FSSSignalDiscovered":
+            self._signal_batcher.add_signal(event)
+            return
 
-            auxiliary_data = self._read_auxiliary_data(auxiliary_filename, source_filepath)
-            if auxiliary_data is None:
-                decky.logger.debug(f"Auxiliary file missing/invalid for {event.event_type}: {auxiliary_filename}")
+        # 2. Check if this event should flush the signal batcher
+        if self._signal_batcher.should_flush(event_type):
+            batch = self._signal_batcher.flush()
+            if batch:
+                message = self.validator.transform_fss_signal_discovered(batch, self.parser.session_state)
+                if message:
+                    await self.submitter.submit(message, event_name="FSSSignalDiscovered")
+
+        # 3. Dedicated schema events (FSSDiscoveryScan, ApproachSettlement, CodexEntry)
+        if event_type in DEDICATED_SCHEMA_EVENTS:
+            await self._process_dedicated_schema_event(event)
+            return
+
+        # 4. Auxiliary file events (Market, Outfitting, Shipyard, NavRoute)
+        if event_type in AUXILIARY_FILES:
+            await self._process_auxiliary_event(event, source_filepath)
+            return
+
+        # 5. Journal/1 events (FSDJump, Scan, Location, Docked, CarrierJump, SAASignalsFound)
+        validated = self.validator.validate(event, self.parser.session_state)
+        if not validated:
+            decky.logger.debug(f"Event validation failed: {event_type}")
+            return
+        message = self.validator.transform(event, self.parser.session_state)
+        await self.submitter.submit(message)
+
+    async def _process_dedicated_schema_event(self, event: ParsedEvent) -> None:
+        """Process events with dedicated EDDN schemas (not journal/1)."""
+        event_type = event.event_type
+        validated = self.validator.validate(event, self.parser.session_state)
+        if not validated:
+            decky.logger.debug(f"Event validation failed: {event_type}")
+            return
+
+        # Dispatch to the appropriate transform method
+        transform_dispatch = {
+            "FSSDiscoveryScan": self.validator.transform_fss_discovery_scan,
+            "ApproachSettlement": self.validator.transform_approach_settlement,
+            "CodexEntry": self.validator.transform_codex_entry,
+        }
+        transformer = transform_dispatch.get(event_type)
+        if transformer is None:
+            decky.logger.debug(f"Unknown dedicated schema: {event_type}")
+            return
+
+        message = transformer(event, self.parser.session_state)
+        if message:
+            await self.submitter.submit(message, event_name=event_type)
+
+    async def _process_auxiliary_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
+        """Process an event that requires an auxiliary JSON file."""
+        auxiliary_info = AUXILIARY_FILES[event.event_type]
+        auxiliary_filename = auxiliary_info["filename"]
+        auxiliary_schema = auxiliary_info["schema"]
+
+        auxiliary_data = self._read_auxiliary_data(auxiliary_filename, source_filepath)
+        if auxiliary_data is None:
+            decky.logger.debug(f"Auxiliary file missing/invalid for {event.event_type}: {auxiliary_filename}")
+            return
+
+        if auxiliary_schema == "navroute":
+            # NavRoute: transform directly using navroute/1 schema
+            message = self.validator.transform_navroute(auxiliary_data, self.parser.session_state)
+            if message is None:
+                decky.logger.debug("NavRoute transform produced no data")
                 return
+            await self.submitter.submit(message, event_name=event.event_type)
+            return
 
-            event_to_validate, message = self._prepare_auxiliary_submission(
-                event, auxiliary_data, auxiliary_schema,
-            )
-            if event_to_validate is None and message is None:
-                return
-
+        # Other auxiliary schemas: use dedicated transform methods
+        _, message = self._prepare_auxiliary_submission(event, auxiliary_data, auxiliary_schema)
         if message is None:
-            if event_to_validate is None:
-                return
-            validated = self.validator.validate(event_to_validate)
-            if not validated:
-                decky.logger.debug(f"Event validation failed: {event_to_validate.event_type}")
-                return
-            message = self.validator.transform(event_to_validate, self.parser.session_state)
-
-        # For auxiliary schemas (commodity/outfitting/shipyard), the message
-        # payload has no "event" key. Pass the trigger event name so the
-        # submitter can log it correctly instead of "unknown".
-        event_name_override = event.event_type if is_auxiliary else None
+            return
+        event_name_override = event.event_type
         await self.submitter.submit(message, event_name=event_name_override)
 
     def _prepare_auxiliary_submission(
@@ -229,8 +285,7 @@ class JournalWatcher:
     ) -> tuple[ParsedEvent | None, dict | None]:
         """Prepare transformed message or replacement event for auxiliary-based events."""
         if auxiliary_schema == "journal":
-            # NavRoute: auxiliary data replaces the event payload, then goes
-            # through normal journal/1 validate+transform
+            # Should no longer be used, but kept for safety
             auxiliary_timestamp = auxiliary_data.get("timestamp")
             if not auxiliary_timestamp:
                 decky.logger.debug(f"{event.event_type} auxiliary data missing timestamp")
@@ -257,7 +312,6 @@ class JournalWatcher:
 
         message = transformer(auxiliary_data, self.parser.session_state)
         if message is None:
-            # Transform returned None (e.g., empty commodities/modules/ships)
             decky.logger.debug(f"Auxiliary transform produced no data for {event.event_type}")
             return None, None
         return None, message

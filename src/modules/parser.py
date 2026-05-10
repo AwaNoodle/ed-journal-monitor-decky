@@ -20,6 +20,9 @@ class SessionState:
     game_version: str = ""
     game_build: str = ""
     commander: str = ""
+    star_pos: list[float] | None = None
+    system_address: int | None = None
+    star_system: str = ""
 
 
 @dataclass
@@ -65,6 +68,10 @@ class JournalParser:
             self._handle_loadgame(data)
             return ParsedEvent(raw=data, event_type=event_type, timestamp=timestamp)
 
+        # Cache star position from events that contain it
+        if event_type in ("Location", "FSDJump", "CarrierJump"):
+            self._update_star_pos(data)
+
         return ParsedEvent(raw=data, event_type=event_type, timestamp=timestamp)
 
     def is_reportable(self, event: ParsedEvent) -> bool:
@@ -96,3 +103,15 @@ class JournalParser:
         commander = data.get("Commander", "")
         if commander:
             self.session_state.commander = commander
+
+    def _update_star_pos(self, data: dict) -> None:
+        """Cache star position from events that contain it (Location, FSDJump, CarrierJump)."""
+        star_pos = data.get("StarPos")
+        if star_pos and isinstance(star_pos, list):
+            self.session_state.star_pos = star_pos
+        system_address = data.get("SystemAddress")
+        if system_address is not None:
+            self.session_state.system_address = system_address
+        star_system = data.get("StarSystem")
+        if star_system:
+            self.session_state.star_system = star_system

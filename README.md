@@ -155,16 +155,10 @@ Upload endpoint: `https://eddn.edcd.io:4430/upload/`
 | Scan | Body scan data |
 | Location | Current location on load |
 | Docked | Station docking event |
-| FSSDiscoveryScan | Full system scan data |
-| NavRoute | Planned route data (from `NavRoute.json` sidecar) |
-| ApproachBody | Body approach telemetry |
-| LeaveBody | Body departure telemetry |
-| ApproachSettlement | Settlement approach telemetry |
 | CarrierJump | Fleet carrier jump arrival |
-| FSSSignalDiscovered | FSS signal discovery |
-| SAAScanComplete | Detailed surface scan completion |
+| SAASignalsFound | SAA scan signals found |
 
-> **Note:** Market, Outfitting, and Shipyard are also reportable events but use dedicated schemas rather than journal/1 — see below.
+> **Note:** Market, Outfitting, and Shipyard are also reportable events but use dedicated schemas — see Auxiliary below. FSSSignalDiscovered, FSSDiscoveryScan, NavRoute, ApproachSettlement, and CodexEntry use their own dedicated schemas — see below.
 
 ### Auxiliary EDDN schemas
 
@@ -175,9 +169,28 @@ These events trigger reading a sidecar JSON file and use a dedicated schema:
 | Market | `Market.json` | `commodity/3` |
 | Outfitting | `Outfitting.json` | `outfitting/2` |
 | Shipyard | `Shipyard.json` | `shipyard/2` |
-| NavRoute | `NavRoute.json` | `journal/1` |
+| NavRoute | `NavRoute.json` | `navroute/1` |
 
-> NavRoute uses the journal/1 schema but still reads its data from the `NavRoute.json` sidecar file, unlike other journal/1 events which are fully contained in the journal log.
+### Dedicated EDDN schemas
+
+These events have their own EDDN schema (not journal/1):
+
+| Event | Schema | Notes |
+|-------|--------|-------|
+| FSSSignalDiscovered | `fsssignaldiscovered/1` | Batched: individual signals accumulated and flushed on trigger events (FSSDiscoveryScan, SupercruiseEntry, Location, FSDJump, CarrierJump) |
+| FSSDiscoveryScan | `fssdiscoveryscan/1` | Requires `BodyCount`, `NonBodyCount`; `SystemName` → `StarSystem` rename |
+| ApproachSettlement | `approachsettlement/1` | Requires `Latitude`, `Longitude`, `BodyID`, `BodyName`, `MarketID`; `StationName` → `Name` rename |
+| CodexEntry | `codexentry/1` | Requires `Name`, `Region`, `EntryID`, `BodyID`, `BodyName` |
+
+### Events not sent to EDDN
+
+These journal events have no EDDN schema and are not reported:
+
+| Event | Reason |
+|-------|--------|
+| ApproachBody | No EDDN schema exists |
+| LeaveBody | No EDDN schema exists |
+| SAAScanComplete | No EDDN schema exists |
 
 ## UI Panel
 
@@ -194,7 +207,7 @@ The Decky plugin panel has five sections:
 1. **ED starts** → SteamClient fires `AppLifetimeNotifications` (or fallback `/proc` scan for already-running ED) → frontend calls `setEdRunning(true)`
 2. **Path discovery** → frontend calls `findJournalPath()` → backend scans Steam `libraryfolders.vdf` or uses cached path
 3. **Watcher starts** → frontend calls `startWatcher()` → backend polls journal directory every 10s
-4. **Event processing** → new journal lines are parsed → reportable events are validated against EDDN schema requirements → auxiliary sidecar files are read for Market/Outfitting/Shipyard/NavRoute
+4. **Event processing** → new journal lines are parsed → reportable events are validated against EDDN schema requirements → auxiliary sidecar files are read for Market/Outfitting/Shipyard/NavRoute → FSSSignalDiscovered events are batched → dedicated schema events use their own transforms
 5. **Submission** → validated events are transformed (disallowed fields stripped, StarPos/horizons/odyssey augmented) → POSTed to EDDN with retry logic (3 retries, exponential backoff)
 6. **UI updates** → backend emits `upload_success`/`upload_failed`/`activity_update`/`status_update` → frontend updates counters, activity list, and error display
 7. **ED stops** → frontend calls `stopWatcher()` → watcher persists `last_active` timestamp for catch-up on next start
@@ -254,7 +267,9 @@ The plugin registers for suspend/resume notifications and checks consistency on 
 - **/proc scanning**: Process names are truncated to 15 characters by the Linux kernel (`EliteDangerous64.exe` → `EliteDangerous6`); detection may break if Frontier changes the executable name
 - **SteamClient availability**: `SteamClient.GameSessions` and `SteamClient.System` may be undefined on some SteamOS versions
 - **Activity log is in-memory**: Lost on plugin reload/unload; only the last 50 entries are retained
-- **NavRoute requires sidecar file**: Unlike other journal/1 events, NavRoute data comes from `NavRoute.json` in the journal directory
+- **NavRoute requires sidecar file**: NavRoute data comes from `NavRoute.json` in the journal directory, routed to `navroute/1` schema
+- **Signal batching**: FSSSignalDiscovered events are batched and flushed on trigger events; signals accumulated before a crash/reload are lost
+- **ApproachSettlement Latitude/Longitude**: These fields are disallowed in journal/1 but required in approachsettlement/1; per-schema stripping handles this correctly
 
 ## Diagnostic Bundle
 

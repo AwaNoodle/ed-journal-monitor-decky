@@ -108,16 +108,21 @@ class TestIsReportable:
             "Outfitting",
             "Shipyard",
             "NavRoute",
-            "ApproachBody",
-            "LeaveBody",
             "ApproachSettlement",
             "CarrierJump",
             "FSSSignalDiscovered",
-            "SAAScanComplete",
+            "SAASignalsFound",
+            "CodexEntry",
         ]
         for event_type in reportable_events:
             event = ParsedEvent(raw={}, event_type=event_type, timestamp="2026-01-12T12:00:00Z")
             assert parser.is_reportable(event) is True
+
+    def test_removed_events_not_reportable(self, parser):
+        """ApproachBody, LeaveBody, SAAScanComplete have no EDDN schema."""
+        for event_type in ["ApproachBody", "LeaveBody", "SAAScanComplete"]:
+            event = ParsedEvent(raw={}, event_type=event_type, timestamp="2026-01-12T12:00:00Z")
+            assert parser.is_reportable(event) is False
 
     def test_non_reportable_events(self, parser):
         for event_type in ["SupercruiseEntry", "ShieldState", "HullDamage", "Music", "Shutdown"]:

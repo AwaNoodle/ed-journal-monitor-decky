@@ -153,6 +153,29 @@ Extend the ED Journal Monitor Decky plugin to send the same EDDN data that EDMC 
   - **Added edge-case tests**: empty commodities/modules/ships, invalid JSON through watcher, Docked not triggering auxiliary, NavRoute empty route, `_as_dict_list` unit tests, commodity[1] content verification
   - 182 tests passing, all lint clean
 
+## Phase 3: Fix EDDN Schema Mismatches (2026-05-10)
+
+Root cause: Multiple events sent to journal/1 but EDDN rejects them — they belong to dedicated schemas.
+Live Decky log: `EDDN client error 400: 'FSSSignalDiscovered' is not one of ['Docked', 'FSDJump', 'Scan', 'Location', 'SAASignalsFound', 'CarrierJump', 'CodexEntry']`
+
+### Changes applied:
+- **New module**: `signal_batcher.py` — batches FSSSignalDiscovered events, flushes on trigger events
+- **constants.py**: Added 5 dedicated schema refs (fsssignaldiscovered/1, fssdiscoveryscan/1, navroute/1, approachsettlement/1, codexentry/1); added DEDICATED_SCHEMA_EVENTS, JOURNAL_1_ONLY_DISALLOWED, FSS_SIGNAL_DISALLOWED_FIELDS; removed ApproachBody/LeaveBody/SAAScanComplete from REPORTABLE_EVENTS; added SAASignalsFound/CodexEntry; changed NavRoute schema to "navroute"; removed Latitude/Longitude from EDDN_DISALLOWED_FIELDS
+- **validator.py**: Added 5 new transform methods (fss_signal_discovered, fss_discovery_scan, navroute, approach_settlement, codex_entry); updated _strip_disallowed() with keep_fields; added JOURNAL_1_ONLY_DISALLOWED stripping in journal/1 transform; ApproachSettlement StationName→Name dual acceptance; FSSDiscoveryScan SystemName→StarSystem rename
+- **watcher.py**: New routing in _process_reportable_event: FSSSignalDiscovered→batcher, flush triggers, dedicated schema dispatch, auxiliary events, journal/1 fallback
+- **main.py**: Import SignalBatcher, pass to JournalWatcher constructor
+
+### Reviewer feedback applied:
+- Added tests for SystemName→StarSystem rename in FSSDiscoveryScan (both branches)
+- Added test for StationName+Name both present in ApproachSettlement
+- Removed dead code: is_system_change() and clear() from SignalBatcher (flush handles system changes correctly)
+- Fixed broken flush() method (missing return result)
+- Updated README.md: new EDDN schema tables, events not sent section, updated Known Limitations
+- Updated AGENTS.md: test count 330, signal_batcher in module list
+
+### Status:
+- Phase 3: ✅ Complete — 330 tests passing, all lint clean
+
 ## Documentation Review (2026-05-10)
 - Reviewed README.md and AGENTS.md for accuracy against codebase
 - **README.md fixes**: Added NavRoute to auxiliary table, added missing architecture diagram nodes (Activity log, Diagnostics, Constants), added directional arrows (callable vs decky.emit), added full Configuration section (enabled, detailed_logging, uploader_id auto-detection, poll_interval, all settings table), added EDDN upload endpoint, added UI Panel description, added Event Flow walkthrough, added Emitted Events table, added Troubleshooting section (SSL certs, journal path, EDDN failures, ED detection, system resume), added Known Limitations section, added Diagnostic Bundle contents table, softened "no manual setup required" to "for Steam installs", added Proton username note, aligned test command with package.json

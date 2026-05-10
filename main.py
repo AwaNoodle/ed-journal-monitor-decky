@@ -22,6 +22,7 @@ from src.modules.diagnostics import create_diagnostics as _create_diagnostics  #
 from src.modules.parser import JournalParser  # noqa: E402
 from src.modules.path_finder import JournalPathFinder  # noqa: E402
 from src.modules.settings import PluginSettings  # noqa: E402
+from src.modules.signal_batcher import SignalBatcher  # noqa: E402
 from src.modules.submitter import EDDNSubmitter  # noqa: E402
 from src.modules.validator import EDDNValidator  # noqa: E402
 from src.modules.watcher import JournalWatcher  # noqa: E402
@@ -51,11 +52,13 @@ class Plugin:
         self.validator = EDDNValidator()
         self.activity_log = ActivityLog()
         self.submitter = EDDNSubmitter(self.settings, activity_log=self.activity_log)
+        signal_batcher = SignalBatcher()
         self.watcher = JournalWatcher(
             settings=self.settings,
             parser=self.parser,
             validator=self.validator,
             submitter=self.submitter,
+            signal_batcher=signal_batcher,
         )
 
         # Try to find journal path from cache or VDF scan

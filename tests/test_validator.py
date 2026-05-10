@@ -1,11 +1,14 @@
-"""
-Tests for the EDDNValidator module.
-"""
+"""Tests for the EDDNValidator module — updated for EDDN schema fix."""
 
 import pytest
 
 from src.modules.constants import (
+    EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
+    EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
+    EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
+    EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
 )
@@ -45,7 +48,6 @@ class TestValidate:
                 "event": "FSDJump",
                 "StarSystem": "Sol",
                 "SystemAddress": 10477373803,
-                # Missing StarPos
                 "JumpDist": 15.123,
                 "FuelUsed": 2.345,
                 "FuelLevel": 28.655,
@@ -55,7 +57,7 @@ class TestValidate:
         )
         assert validator.validate(event) is False
 
-    def test_valid_scan(self, validator):
+    def test_valid_scan_with_session_state(self, validator):
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T12:10:45Z",
@@ -63,11 +65,50 @@ class TestValidate:
                 "ScanType": "Detailed",
                 "BodyName": "Sol",
                 "DistanceFromArrivalLS": 0.0,
+                "SystemAddress": 10477373803,
             },
             event_type="Scan",
             timestamp="2026-01-12T12:10:45Z",
         )
-        assert validator.validate(event) is True
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is True
+
+    def test_scan_rejected_without_session_state(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:10:45Z",
+                "event": "Scan",
+                "ScanType": "Detailed",
+                "BodyName": "Sol",
+                "DistanceFromArrivalLS": 0.0,
+                "SystemAddress": 10477373803,
+            },
+            event_type="Scan",
+            timestamp="2026-01-12T12:10:45Z",
+        )
+        assert validator.validate(event) is False
+
+    def test_scan_rejected_with_wrong_system(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:10:45Z",
+                "event": "Scan",
+                "ScanType": "Detailed",
+                "BodyName": "Sol",
+                "DistanceFromArrivalLS": 0.0,
+                "SystemAddress": 99999,
+            },
+            event_type="Scan",
+            timestamp="2026-01-12T12:10:45Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is False
 
     def test_valid_location(self, validator):
         event = ParsedEvent(
@@ -83,7 +124,7 @@ class TestValidate:
         )
         assert validator.validate(event) is True
 
-    def test_valid_docked(self, validator):
+    def test_valid_docked_with_session_state(self, validator):
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T13:00:00Z",
@@ -95,20 +136,25 @@ class TestValidate:
             event_type="Docked",
             timestamp="2026-01-12T13:00:00Z",
         )
-        assert validator.validate(event) is True
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is True
 
-    def test_valid_fssdiscoveryscan(self, validator):
+    def test_docked_rejected_without_session_state(self, validator):
         event = ParsedEvent(
             raw={
-                "timestamp": "2026-01-12T12:15:00Z",
-                "event": "FSSDiscoveryScan",
-                "SystemName": "Sol",
+                "timestamp": "2026-01-12T13:00:00Z",
+                "event": "Docked",
+                "StationName": "Jameson Memorial",
+                "StarSystem": "Shinrarta Dezhra",
                 "SystemAddress": 10477373803,
             },
-            event_type="FSSDiscoveryScan",
-            timestamp="2026-01-12T12:15:00Z",
+            event_type="Docked",
+            timestamp="2026-01-12T13:00:00Z",
         )
-        assert validator.validate(event) is True
+        assert validator.validate(event) is False
 
     def test_unknown_event_type(self, validator):
         event = ParsedEvent(
@@ -118,27 +164,39 @@ class TestValidate:
         )
         assert validator.validate(event) is False
 
+    def test_saa_signals_found_valid(self, validator):
+        """SAASignalsFound is a journal/1 event requiring StarSystem and SystemAddress."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:05:00Z",
+                "event": "SAASignalsFound",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+            },
+            event_type="SAASignalsFound",
+            timestamp="2026-01-12T14:05:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is True
+
+    def test_saa_signals_found_missing_starsystem(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:05:00Z",
+                "event": "SAASignalsFound",
+                "SystemAddress": 10477373803,
+            },
+            event_type="SAASignalsFound",
+            timestamp="2026-01-12T14:05:00Z",
+        )
+        assert validator.validate(event) is False
+
     @pytest.mark.parametrize(
         ("event_type", "required_field", "complete_raw"),
         [
-            ("ApproachBody", "SystemAddress", {
-                "timestamp": "2026-01-12T14:01:00Z",
-                "event": "ApproachBody",
-                "StarSystem": "Sol",
-                "BodyName": "Earth",
-            }),
-            ("LeaveBody", "BodyName", {
-                "timestamp": "2026-01-12T14:01:10Z",
-                "event": "LeaveBody",
-                "StarSystem": "Sol",
-                "SystemAddress": 10477373803,
-            }),
-            ("ApproachSettlement", "StationName", {
-                "timestamp": "2026-01-12T14:01:20Z",
-                "event": "ApproachSettlement",
-                "StarSystem": "Sol",
-                "SystemAddress": 10477373803,
-            }),
             ("CarrierJump", "StarPos", {
                 "timestamp": "2026-01-12T14:02:00Z",
                 "event": "CarrierJump",
@@ -150,17 +208,89 @@ class TestValidate:
                 "event": "FSSSignalDiscovered",
                 "SystemAddress": 10477373803,
             }),
-            ("SAAScanComplete", "SystemAddress", {
-                "timestamp": "2026-01-12T14:04:00Z",
-                "event": "SAAScanComplete",
-                "BodyName": "Earth",
+            ("FSSDiscoveryScan", "SystemAddress", {
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "StarSystem": "Sol",
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+            }),
+            ("CodexEntry", "Name", {
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "SystemAddress": 10477373803,
             }),
         ],
     )
-    def test_new_events_missing_required_field(self, validator, event_type, required_field, complete_raw):
-        """Each new event must fail validation when a required field is missing."""
+    def test_missing_required_field_rejected(self, validator, event_type, required_field, complete_raw):
+        """Each event must fail validation when a required field is missing."""
         event = ParsedEvent(raw=complete_raw, event_type=event_type, timestamp=complete_raw["timestamp"])
         assert validator.validate(event) is False
+
+    def test_approach_settlement_requires_station_name_or_name(self, validator):
+        """ApproachSettlement requires StationName (journal) or Name (after rename)."""
+        raw = {
+            "timestamp": "2026-01-12T14:01:20Z",
+            "event": "ApproachSettlement",
+            "StarSystem": "Sol",
+            "SystemAddress": 10477373803,
+            "BodyID": 1,
+            "BodyName": "Earth",
+            "MarketID": 128666762,
+            "Latitude": 42.0,
+            "Longitude": -7.0,
+        }
+        event = ParsedEvent(raw=raw, event_type="ApproachSettlement", timestamp=raw["timestamp"])
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        # Neither StationName nor Name present - should fail
+        assert validator.validate(event, session_state) is False
+
+    def test_approach_settlement_valid_with_station_name(self, validator):
+        """ApproachSettlement with StationName (from journal) should validate."""
+        raw = {
+            "timestamp": "2026-01-12T14:01:20Z",
+            "event": "ApproachSettlement",
+            "StarSystem": "Sol",
+            "SystemAddress": 10477373803,
+            "StationName": "Galileo",
+            "BodyID": 1,
+            "BodyName": "Earth",
+            "MarketID": 128666762,
+            "Latitude": 42.0,
+            "Longitude": -7.0,
+        }
+        event = ParsedEvent(raw=raw, event_type="ApproachSettlement", timestamp=raw["timestamp"])
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is True
+
+    def test_approach_settlement_valid_with_name(self, validator):
+        """ApproachSettlement with Name (already renamed) should also validate."""
+        raw = {
+            "timestamp": "2026-01-12T14:01:20Z",
+            "event": "ApproachSettlement",
+            "StarSystem": "Sol",
+            "SystemAddress": 10477373803,
+            "Name": "Galileo",
+            "BodyID": 1,
+            "BodyName": "Earth",
+            "MarketID": 128666762,
+            "Latitude": 42.0,
+            "Longitude": -7.0,
+        }
+        event = ParsedEvent(raw=raw, event_type="ApproachSettlement", timestamp=raw["timestamp"])
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is True
 
 
 class TestValidateNewJournalEvents:
@@ -204,36 +334,6 @@ class TestValidateNewJournalEvents:
         ("event_type", "raw"),
         [
             (
-                "ApproachBody",
-                {
-                    "timestamp": "2026-01-12T14:01:00Z",
-                    "event": "ApproachBody",
-                    "StarSystem": "Sol",
-                    "SystemAddress": 10477373803,
-                    "BodyName": "Earth",
-                },
-            ),
-            (
-                "LeaveBody",
-                {
-                    "timestamp": "2026-01-12T14:01:10Z",
-                    "event": "LeaveBody",
-                    "StarSystem": "Sol",
-                    "SystemAddress": 10477373803,
-                    "BodyName": "Earth",
-                },
-            ),
-            (
-                "ApproachSettlement",
-                {
-                    "timestamp": "2026-01-12T14:01:20Z",
-                    "event": "ApproachSettlement",
-                    "StarSystem": "Sol",
-                    "SystemAddress": 10477373803,
-                    "StationName": "Galileo",
-                },
-            ),
-            (
                 "CarrierJump",
                 {
                     "timestamp": "2026-01-12T14:02:00Z",
@@ -244,6 +344,30 @@ class TestValidateNewJournalEvents:
                 },
             ),
             (
+                "SAASignalsFound",
+                {
+                    "timestamp": "2026-01-12T14:05:00Z",
+                    "event": "SAASignalsFound",
+                    "StarSystem": "Sol",
+                    "SystemAddress": 10477373803,
+                },
+            ),
+        ],
+    )
+    def test_valid_journal1_events_with_session_state(self, validator, event_type, raw):
+        """Journal/1 events lacking StarPos need session_state for validation."""
+        event = ParsedEvent(raw=raw, event_type=event_type, timestamp=raw["timestamp"])
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is True
+
+    @pytest.mark.parametrize(
+        ("event_type", "raw"),
+        [
+            (
                 "FSSSignalDiscovered",
                 {
                     "timestamp": "2026-01-12T14:03:00Z",
@@ -253,23 +377,59 @@ class TestValidateNewJournalEvents:
                 },
             ),
             (
-                "SAAScanComplete",
+                "FSSDiscoveryScan",
                 {
-                    "timestamp": "2026-01-12T14:04:00Z",
-                    "event": "SAAScanComplete",
-                    "BodyName": "Earth",
+                    "timestamp": "2026-01-12T12:15:00Z",
+                    "event": "FSSDiscoveryScan",
+                    "StarSystem": "Sol",
                     "SystemAddress": 10477373803,
+                    "BodyCount": 21,
+                    "NonBodyCount": 42,
+                },
+            ),
+            (
+                "ApproachSettlement",
+                {
+                    "timestamp": "2026-01-12T14:01:20Z",
+                    "event": "ApproachSettlement",
+                    "StarSystem": "Sol",
+                    "SystemAddress": 10477373803,
+                    "Name": "Galileo",
+                    "BodyID": 1,
+                    "BodyName": "Earth",
+                    "MarketID": 128666762,
+                    "Latitude": 42.0,
+                    "Longitude": -7.0,
+                },
+            ),
+            (
+                "CodexEntry",
+                {
+                    "timestamp": "2026-01-12T15:00:00Z",
+                    "event": "CodexEntry",
+                    "SystemAddress": 10477373803,
+                    "Name": "$Codex_Ent_Name_1;",
+                    "Region": "TestRegion",
+                    "EntryID": 123,
+                    "BodyID": 1,
+                    "BodyName": "Earth",
                 },
             ),
         ],
     )
-    def test_valid_new_journal_events(self, validator, event_type, raw):
+    def test_valid_dedicated_schema_events_with_session_state(self, validator, event_type, raw):
+        """Dedicated schema events needing StarPos require session_state."""
         event = ParsedEvent(raw=raw, event_type=event_type, timestamp=raw["timestamp"])
-        assert validator.validate(event) is True
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is True
 
 
 class TestTransform:
-    """Tests for transform method."""
+    """Tests for journal/1 transform method."""
 
     def test_strips_disallowed_fields(self, validator):
         event = ParsedEvent(
@@ -337,7 +497,6 @@ class TestTransform:
         assert "Name" in faction
 
     def test_strips_localised_fields_in_array(self, validator):
-        """_Localised keys inside arrays (e.g. Factions[], StationEconomies[]) are stripped."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T12:50:00Z",
@@ -373,18 +532,15 @@ class TestTransform:
         session_state = SessionState()
         message = validator.transform(event, session_state)
 
-        # Factions array
         for faction in message["message"]["Factions"]:
             assert "Government_Localised" not in faction
             assert "Happiness_Localised" not in faction
             assert "Government" in faction
-        # StationEconomies array
         for economy in message["message"]["StationEconomies"]:
             assert "Name_Localised" not in economy
             assert "Name" in economy
 
     def test_strips_disallowed_in_nested_structures(self, validator):
-        """Disallowed fields are stripped at all nesting levels."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T12:05:30Z",
@@ -408,6 +564,94 @@ class TestTransform:
         assert "ActiveFine" not in faction
         assert "Wanted" not in faction
         assert "Name" in faction
+
+    def test_strips_factions_disallowed_fields(self, validator):
+        """MyReputation and other Factions-specific disallowed fields are stripped."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:50:00Z",
+                "event": "Location",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Factions": [
+                    {
+                        "Name": "Piegua Rats",
+                        "FactionState": "None",
+                        "Government": "Anarchy",
+                        "Influence": 0.04,
+                        "Allegiance": "Independent",
+                        "Happiness": "$Faction_HappinessBand2;",
+                        "MyReputation": 56.52,
+                        "HappiestSystem": "Sol",
+                        "HomeSystem": "Sol",
+                        "SquadronFaction": "Yes",
+                    },
+                    {
+                        "Name": "The Forge",
+                        "FactionState": "Expansion",
+                        "Government": "Cooperative",
+                        "Influence": 0.65,
+                        "Allegiance": "Independent",
+                        "MyReputation": 100.0,
+                    },
+                ],
+            },
+            event_type="Location",
+            timestamp="2026-01-12T12:50:00Z",
+        )
+        session_state = SessionState()
+        message = validator.transform(event, session_state)
+
+        for faction in message["message"]["Factions"]:
+            assert "MyReputation" not in faction
+            assert "HappiestSystem" not in faction
+            assert "HomeSystem" not in faction
+            assert "SquadronFaction" not in faction
+            assert "Name" in faction
+            assert "Influence" in faction
+
+    def test_augments_starpos_from_session_state(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T13:00:00Z",
+                "event": "Docked",
+                "StationName": "Jameson Memorial",
+                "StarSystem": "Shinrarta Dezhra",
+                "SystemAddress": 10477373803,
+            },
+            event_type="Docked",
+            timestamp="2026-01-12T13:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Shinrarta Dezhra",
+        )
+        message = validator.transform(event, session_state)
+
+        assert message["message"]["StarPos"] == [0.0, 0.0, 0.0]
+        assert message["message"]["StarSystem"] == "Shinrarta Dezhra"
+
+    def test_does_not_augment_starpos_if_system_mismatch(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T13:00:00Z",
+                "event": "Docked",
+                "StationName": "Jameson Memorial",
+                "StarSystem": "Sol",
+                "SystemAddress": 99999,
+            },
+            event_type="Docked",
+            timestamp="2026-01-12T13:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        message = validator.transform(event, session_state)
+
+        assert "StarPos" not in message["message"]
 
     def test_augments_horizons_odyssey(self, validator):
         event = ParsedEvent(
@@ -445,7 +689,7 @@ class TestTransform:
         assert "header" in message
         assert "message" in message
 
-    def test_transform_new_journal_event(self, validator):
+    def test_transform_carrier_jump(self, validator):
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T14:02:00Z",
@@ -462,6 +706,784 @@ class TestTransform:
         assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
         assert message["message"]["event"] == "CarrierJump"
         assert message["message"]["StarSystem"] == "Sol"
+
+    def test_latitude_longitude_stripped_in_journal1(self, validator):
+        """Latitude and Longitude must be stripped in journal/1 context."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:05:30Z",
+                "event": "FSDJump",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+            },
+            event_type="FSDJump",
+            timestamp="2026-01-12T12:05:30Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform(event, session_state)
+
+        assert "Latitude" not in message["message"]
+        assert "Longitude" not in message["message"]
+
+    def test_voucher_amount_stripped_in_journal1(self, validator):
+        """VoucherAmount must be stripped in journal/1 context."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:05:30Z",
+                "event": "FSDJump",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "VoucherAmount": 5000,
+            },
+            event_type="FSDJump",
+            timestamp="2026-01-12T12:05:30Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform(event, session_state)
+
+        assert "VoucherAmount" not in message["message"]
+
+    def test_traits_stripped_in_journal1(self, validator):
+        """Traits must be stripped in journal/1 context."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:05:30Z",
+                "event": "FSDJump",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Traits": ["trait1"],
+                "IsNewEntry": True,
+                "NewTraitsDiscovered": False,
+            },
+            event_type="FSDJump",
+            timestamp="2026-01-12T12:05:30Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform(event, session_state)
+
+        assert "Traits" not in message["message"]
+        assert "IsNewEntry" not in message["message"]
+        assert "NewTraitsDiscovered" not in message["message"]
+
+
+class TestTransformFSSSignalDiscovered:
+    """Tests for transform_fss_signal_discovered method."""
+
+    def _make_batch(self, signals=None, **kwargs):
+        """Helper to build a batch dict for the transform."""
+        batch = {
+            "signals": signals if signals is not None else [{"SignalName": "TestSignal"}],
+            "last_timestamp": kwargs.get("last_timestamp", "2026-01-12T14:03:05Z"),
+            "system_address": kwargs.get("system_address", 10477373803),
+            "star_system": kwargs.get("star_system", "Sol"),
+            "star_pos": kwargs.get("star_pos", [0.0, 0.0, 0.0]),
+        }
+        return batch  # noqa: RET504
+
+    def test_valid_batch(self, validator):
+        batch = self._make_batch(signals=[
+            {"SignalName": "$MULTIPLAYER_SCENARIO42_TITLE;"},
+            {"SignalName": "TestSignal", "IsStation": True},
+        ])
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF
+        assert len(message["message"]["signals"]) == 2
+        assert message["message"]["signals"][0]["SignalName"] == "$MULTIPLAYER_SCENARIO42_TITLE;"
+        assert message["message"]["signals"][1]["SignalName"] == "TestSignal"
+        assert message["message"]["signals"][1]["IsStation"] is True
+
+    def test_empty_batch_returns_none(self, validator):
+        batch = self._make_batch(signals=[])
+        session_state = SessionState()
+        assert validator.transform_fss_signal_discovered(batch, session_state) is None
+
+    def test_schema_ref(self, validator):
+        batch = self._make_batch()
+        session_state = SessionState()
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+        assert message["$schemaRef"] == EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF
+
+    def test_preserves_signal_fields(self, validator):
+        signals = [{
+            "SignalName": "$MULTIPLAYER_SCENARIO42_TITLE;",
+            "IsStation": True,
+            "USSType": "$USS_Type_Debris;",
+            "SpawningState": "$FactionState_Boom;",
+            "SpawningFaction": "Test Faction",
+            "ThreatLevel": 2,
+            "SignalType": "USS",
+            "SpawningPower": "Aisling Duval",
+            "OpposingPower": "Zachary Hudson",
+        }]
+        batch = self._make_batch(signals=signals)
+        session_state = SessionState(horizons=True, odyssey=False)
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+
+        signal = message["message"]["signals"][0]
+        assert signal["SignalName"] == "$MULTIPLAYER_SCENARIO42_TITLE;"
+        assert signal["IsStation"] is True
+        assert signal["USSType"] == "$USS_Type_Debris;"
+        assert signal["SpawningState"] == "$FactionState_Boom;"
+        assert signal["SpawningFaction"] == "Test Faction"
+        assert signal["ThreatLevel"] == 2
+        assert signal["SignalType"] == "USS"
+        assert signal["SpawningPower"] == "Aisling Duval"
+        assert signal["OpposingPower"] == "Zachary Hudson"
+
+    def test_augments_star_pos_from_session_state(self, validator):
+        batch = self._make_batch(star_pos=None)
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+        assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
+
+    def test_message_level_fields(self, validator):
+        batch = self._make_batch()
+        session_state = SessionState(horizons=True, odyssey=False)
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T14:03:05Z"
+        assert payload["event"] == "FSSSignalDiscovered"
+        assert payload["StarSystem"] == "Sol"
+        assert payload["SystemAddress"] == 10477373803
+        assert payload["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is False
+
+    def test_localised_keys_stripped_from_signals(self, validator):
+        signals = [{
+            "SignalName": "$Test;",
+            "SignalName_Localised": "Test",
+            "SpawningState": "$Boom;",
+            "SpawningState_Localised": "Boom",
+        }]
+        batch = self._make_batch(signals=signals)
+        session_state = SessionState()
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+
+        signal = message["message"]["signals"][0]
+        assert "SignalName_Localised" not in signal
+        assert "SpawningState_Localised" not in signal
+        assert signal["SignalName"] == "$Test;"
+        assert signal["SpawningState"] == "$Boom;"
+
+
+class TestTransformFSSDiscoveryScan:
+    """Tests for transform_fss_discovery_scan method."""
+
+    def test_valid_event(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+                "Progress": 0.95,
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T12:15:00Z"
+        assert payload["StarSystem"] == "Sol"
+        assert payload["SystemAddress"] == 10477373803
+        assert payload["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["BodyCount"] == 21
+        assert payload["NonBodyCount"] == 42
+        assert payload["Progress"] == 0.95
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is True
+
+    def test_schema_ref(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "BodyCount": 1,
+                "NonBodyCount": 0,
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        message = validator.transform_fss_discovery_scan(event, session_state)
+        assert message["$schemaRef"] == EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF
+
+    def test_augments_star_pos_from_session_state(self, validator):
+        """FSSDiscoveryScan often lacks StarPos; should be augmented from session_state."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
+
+    def test_strips_disallowed_fields(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+                "ActiveFine": True,
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert "ActiveFine" not in message["message"]
+
+    def test_renames_system_name_to_star_system(self, validator):
+        """ED journal uses SystemName, but EDDN fssdiscoveryscan/1 requires StarSystem."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert message is not None
+        payload = message["message"]
+        assert "SystemName" not in payload
+        assert payload["StarSystem"] == "Sol"
+
+    def test_drops_system_name_when_star_system_present(self, validator):
+        """If both SystemName and StarSystem exist, keep StarSystem and drop SystemName."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "SystemName": "Sol",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert message is not None
+        payload = message["message"]
+        assert "SystemName" not in payload
+        assert payload["StarSystem"] == "Sol"
+
+
+class TestTransformNavRoute:
+    """Tests for transform_navroute method."""
+
+    def test_valid_data(self, validator, load_fixture):
+        navroute_data = load_fixture("NavRoute.json")
+        session_state = SessionState(horizons=True, odyssey=True)
+
+        message = validator.transform_navroute(navroute_data, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_NAVROUTE_1_SCHEMA_REF
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T14:00:00Z"
+        assert payload["event"] == "NavRoute"
+        assert len(payload["Route"]) == 2
+        # Route entries should have StarClass and StarPos
+        assert payload["Route"][0]["StarClass"] == "G"
+        assert payload["Route"][0]["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["Route"][1]["StarClass"] == "B"
+        assert payload["Route"][1]["StarPos"] == [-3.09375, -0.09375, 3.03125]
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is True
+
+    def test_schema_ref(self, validator, load_fixture):
+        navroute_data = load_fixture("NavRoute.json")
+        session_state = SessionState()
+        message = validator.transform_navroute(navroute_data, session_state)
+        assert message["$schemaRef"] == EDDN_NAVROUTE_1_SCHEMA_REF
+
+    def test_augments_star_pos_at_message_level(self, validator, load_fixture):
+        """NavRoute/1 requires StarSystem/StarPos/SystemAddress at message level."""
+        navroute_data = load_fixture("NavRoute.json")
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_navroute(navroute_data, session_state)
+
+        payload = message["message"]
+        assert "StarSystem" in payload
+        assert "StarPos" in payload
+        assert "SystemAddress" in payload
+
+    def test_strips_localised_from_route_entries(self, validator):
+        """_Localised keys in Route entries should be stripped."""
+        navroute_data = {
+            "timestamp": "2026-01-12T14:00:00Z",
+            "event": "NavRoute",
+            "Route": [
+                {
+                    "StarSystem": "Sol",
+                    "SystemAddress": 10477373803,
+                    "StarPos": [0.0, 0.0, 0.0],
+                    "StarClass": "G",
+                    "StarSystem_Localised": "Sol",
+                },
+            ],
+        }
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_navroute(navroute_data, session_state)
+
+        route_entry = message["message"]["Route"][0]
+        assert "StarSystem_Localised" not in route_entry
+        assert "StarSystem" in route_entry
+
+
+class TestTransformApproachSettlement:
+    """Tests for transform_approach_settlement method."""
+
+    def test_preserves_latitude_longitude(self, validator):
+        """Latitude and Longitude must be preserved for approachsettlement/1."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "Name": "Galileo",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_approach_settlement(event, session_state)
+
+        payload = message["message"]
+        assert payload["Latitude"] == 42.0
+        assert payload["Longitude"] == -7.0
+
+    def test_renames_station_name_to_name(self, validator):
+        """StationName should be renamed to Name in approachsettlement/1 schema."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StationName": "Galileo",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_approach_settlement(event, session_state)
+
+        payload = message["message"]
+        assert "StationName" not in payload
+        assert payload["Name"] == "Galileo"
+
+    def test_drops_station_name_when_name_present(self, validator):
+        """If both StationName and Name exist, keep Name and drop StationName."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StationName": "Galileo",
+                "Name": "Galileo Base",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_approach_settlement(event, session_state)
+
+        payload = message["message"]
+        assert "StationName" not in payload
+        assert payload["Name"] == "Galileo Base"
+
+    def test_schema_ref(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "Name": "Galileo",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_approach_settlement(event, session_state)
+
+        assert message["$schemaRef"] == EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF
+
+    def test_augments_star_pos_from_session_state(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "Name": "Galileo",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_approach_settlement(event, session_state)
+
+        assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
+
+    def test_strips_other_disallowed_fields(self, validator):
+        """Fields like ActiveFine should still be stripped even though Latitude/Longitude are kept."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "Name": "Galileo",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+                "StarPos": [0.0, 0.0, 0.0],
+                "ActiveFine": True,
+                "Wanted": True,
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_approach_settlement(event, session_state)
+
+        assert "ActiveFine" not in message["message"]
+        assert "Wanted" not in message["message"]
+        assert message["message"]["Latitude"] == 42.0
+        assert message["message"]["Longitude"] == -7.0
+
+    def test_strips_localised_keys(self, validator):
+        """_Localised keys should be stripped from approachsettlement/1 messages."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T14:01:20Z",
+                "event": "ApproachSettlement",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "Name": "Galileo",
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "MarketID": 128666762,
+                "Latitude": 42.0,
+                "Longitude": -7.0,
+                "StarPos": [0.0, 0.0, 0.0],
+                "BodyName_Localised": "Earth",
+            },
+            event_type="ApproachSettlement",
+            timestamp="2026-01-12T14:01:20Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_approach_settlement(event, session_state)
+
+        assert "BodyName_Localised" not in message["message"]
+
+
+class TestTransformCodexEntry:
+    """Tests for transform_codex_entry method."""
+
+    def test_valid_event(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_CODEXENTRY_1_SCHEMA_REF
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T15:00:00Z"
+        assert payload["Name"] == "$Codex_Ent_Name_1;"
+        assert payload["Region"] == "TestRegion"
+        assert payload["EntryID"] == 123
+        assert payload["BodyID"] == 1
+        assert payload["BodyName"] == "Earth"
+        assert payload["StarSystem"] == "Sol"
+        assert payload["SystemAddress"] == 10477373803
+        assert payload["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is True
+
+    def test_schema_ref(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_codex_entry(event, session_state)
+        assert message["$schemaRef"] == EDDN_CODEXENTRY_1_SCHEMA_REF
+
+    def test_preserves_voucher_amount(self, validator):
+        """VoucherAmount is valid in codexentry/1 but disallowed in journal/1."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+                "VoucherAmount": 5000,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert message["message"]["VoucherAmount"] == 5000
+
+    def test_preserves_traits(self, validator):
+        """Traits is valid in codexentry/1 but disallowed in journal/1."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+                "Traits": ["trait1", "trait2"],
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert message["message"]["Traits"] == ["trait1", "trait2"]
+
+    def test_preserves_is_new_entry(self, validator):
+        """IsNewEntry is valid in codexentry/1 but disallowed in journal/1."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+                "IsNewEntry": True,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert message["message"]["IsNewEntry"] is True
+
+    def test_preserves_new_traits_discovered(self, validator):
+        """NewTraitsDiscovered is valid in codexentry/1 but disallowed in journal/1."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+                "NewTraitsDiscovered": False,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert message["message"]["NewTraitsDiscovered"] is False
+
+    def test_augments_star_pos_from_session_state(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
+        assert message["message"]["StarSystem"] == "Sol"
+
+    def test_strips_localised_keys(self, validator):
+        """_Localised keys should be stripped from codexentry/1 messages."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Name_Localised": "Some Name",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert "Name_Localised" not in message["message"]
+        assert message["message"]["Name"] == "$Codex_Ent_Name_1;"
 
 
 class TestTransformCommodity:
@@ -480,8 +1502,6 @@ class TestTransformCommodity:
         assert payload["marketId"] == 128666762
         assert payload["horizons"] is True
         assert payload["odyssey"] is False
-
-        # First fixture item has stock/demand bracket both 0, should be filtered out
         assert len(payload["commodities"]) == 2
         assert payload["commodities"][0] == {
             "name": "hydrogenfuel",
@@ -505,7 +1525,6 @@ class TestTransformCommodity:
         }
 
     def test_transform_commodity_empty_returns_none(self, validator):
-        """All items with stockBracket=0 and demandBracket=0 → None."""
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -518,7 +1537,6 @@ class TestTransformCommodity:
         assert validator.transform_commodity(market_data, SessionState()) is None
 
     def test_transform_commodity_no_items_returns_none(self, validator):
-        """Items key present but empty → None."""
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -529,7 +1547,6 @@ class TestTransformCommodity:
         assert validator.transform_commodity(market_data, SessionState()) is None
 
     def test_transform_commodity_missing_starsystem_returns_none(self, validator):
-        """Missing StarSystem → None (EDDN requires non-empty systemName)."""
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StationName": "Test",
@@ -539,7 +1556,6 @@ class TestTransformCommodity:
         assert validator.transform_commodity(market_data, SessionState()) is None
 
     def test_transform_commodity_missing_marketid_returns_none(self, validator):
-        """Missing MarketID → None (EDDN requires non-zero marketId)."""
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -549,7 +1565,6 @@ class TestTransformCommodity:
         assert validator.transform_commodity(market_data, SessionState()) is None
 
     def test_transform_commodity_empty_stationname_returns_none(self, validator):
-        """Empty StationName → None (EDDN requires non-empty stationName)."""
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -574,7 +1589,6 @@ class TestTransformOutfitting:
         assert payload["systemName"] == "Shinrarta Dezhra"
         assert payload["stationName"] == "Jameson Memorial"
         assert payload["marketId"] == 128666762
-        # EDDN outfitting/2 schema: modules is an array of strings
         assert payload["modules"] == [
             "int_cargo_rack_size6_class1",
             "int_shieldgenerator_size8_class5_fast",
@@ -583,7 +1597,6 @@ class TestTransformOutfitting:
         assert payload["odyssey"] is True
 
     def test_transform_outfitting_empty_returns_none(self, validator):
-        """No modules → None."""
         outfitting_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -594,7 +1607,6 @@ class TestTransformOutfitting:
         assert validator.transform_outfitting(outfitting_data, SessionState()) is None
 
     def test_transform_outfitting_missing_starsystem_returns_none(self, validator):
-        """Missing StarSystem → None."""
         outfitting_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StationName": "Test",
@@ -604,7 +1616,6 @@ class TestTransformOutfitting:
         assert validator.transform_outfitting(outfitting_data, SessionState()) is None
 
     def test_transform_outfitting_zero_marketid_returns_none(self, validator):
-        """MarketID=0 → None."""
         outfitting_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -628,13 +1639,11 @@ class TestTransformShipyard:
         assert payload["systemName"] == "Shinrarta Dezhra"
         assert payload["stationName"] == "Jameson Memorial"
         assert payload["marketId"] == 128666762
-        # EDDN shipyard/2 schema: ships is an array of strings
         assert payload["ships"] == ["sidey", "eagle"]
         assert payload["horizons"] is True
         assert payload["odyssey"] is True
 
     def test_transform_shipyard_empty_returns_none(self, validator):
-        """No ships → None."""
         shipyard_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
@@ -645,7 +1654,6 @@ class TestTransformShipyard:
         assert validator.transform_shipyard(shipyard_data, SessionState()) is None
 
     def test_transform_shipyard_missing_starsystem_returns_none(self, validator):
-        """Missing StarSystem → None."""
         shipyard_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StationName": "Test",
@@ -655,7 +1663,6 @@ class TestTransformShipyard:
         assert validator.transform_shipyard(shipyard_data, SessionState()) is None
 
     def test_transform_shipyard_zero_marketid_returns_none(self, validator):
-        """MarketID=0 → None."""
         shipyard_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",

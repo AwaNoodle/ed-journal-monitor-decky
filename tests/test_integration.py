@@ -13,7 +13,9 @@ from main import Plugin
 from src.modules.activity_log import ActivityLog
 from src.modules.constants import (
     EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
+    EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
 )
@@ -56,10 +58,15 @@ class TestEndToEndPipeline:
 
         # Verify events were processed
         # The fixture has: Fileheader, LoadGame, FSDJump, Scan, FSSDiscoveryScan
-        # Reportable: FSDJump, Scan, FSSDiscoveryScan
+        # Reportable: FSDJump (journal/1), Scan (journal/1), FSSDiscoveryScan (fssdiscoveryscan/1)
         reportable_events = [m for m in submitted_messages if m.get("message", {}).get("event") in
                             ["FSDJump", "Scan", "FSSDiscoveryScan"]]
         assert len(reportable_events) == 3
+
+        # Verify schemas: FSDJump and Scan use journal/1, FSSDiscoveryScan uses fssdiscoveryscan/1
+        schema_refs = {m["$schemaRef"] for m in reportable_events}
+        assert EDDN_JOURNAL_1_SCHEMA_REF in schema_refs
+        assert EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF in schema_refs
 
         # Verify LoadGame was captured for session state
         assert parser.session_state.horizons is not None
@@ -182,7 +189,7 @@ class TestEndToEndPipeline:
 
         submitter.submit.assert_awaited_once()
         message = submitter.submit.await_args.args[0]
-        assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
+        assert message["$schemaRef"] == EDDN_NAVROUTE_1_SCHEMA_REF
         assert message["message"]["event"] == "NavRoute"
         assert len(message["message"]["Route"]) == 2
 

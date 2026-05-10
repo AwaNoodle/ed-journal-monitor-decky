@@ -1,6 +1,7 @@
 """
 Tests for the JournalWatcher module.
-Tests position tracking, incremental reading, and auxiliary file handling.
+Tests position tracking, incremental reading, auxiliary file handling,
+and dedicated EDDN schema routing.
 """
 
 from unittest.mock import AsyncMock
@@ -9,8 +10,13 @@ import pytest
 from conftest import MockSettings
 
 from src.modules.constants import (
+    EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
+    EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
+    EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
+    EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
 )
@@ -22,11 +28,19 @@ from src.modules.watcher import JournalWatcher
 
 @pytest.fixture
 def watcher():
+    from src.modules.signal_batcher import SignalBatcher
     settings = MockSettings()
     parser = JournalParser()
     validator = EDDNValidator()
     submitter = EDDNSubmitter(settings)
-    return JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+    signal_batcher = SignalBatcher()
+    return JournalWatcher(
+        settings=settings,
+        parser=parser,
+        validator=validator,
+        submitter=submitter,
+        signal_batcher=signal_batcher,
+    )
 
 
 class TestFilePositions:
@@ -182,6 +196,7 @@ class TestAuxiliaryFileHandling:
 
     @pytest.mark.asyncio
     async def test_navroute_event_uses_navroute_json(self, watcher, tmp_path, copy_fixture):
+        """NavRoute now uses navroute/1 schema (not journal/1)."""
         copy_fixture("NavRoute.json")
         watcher.submitter.submit = AsyncMock(return_value=True)
 
@@ -197,9 +212,12 @@ class TestAuxiliaryFileHandling:
 
         watcher.submitter.submit.assert_awaited_once()
         message = watcher.submitter.submit.await_args.args[0]
-        assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
+        assert message["$schemaRef"] == EDDN_NAVROUTE_1_SCHEMA_REF
         assert message["message"]["event"] == "NavRoute"
         assert len(message["message"]["Route"]) == 2
+        # Verify event_name is passed for auxiliary schemas
+        call_kwargs = watcher.submitter.submit.await_args.kwargs
+        assert call_kwargs.get("event_name") == "NavRoute"
 
     @pytest.mark.asyncio
     async def test_docked_event_does_not_trigger_auxiliary(self, watcher, tmp_path):
@@ -210,17 +228,27 @@ class TestAuxiliaryFileHandling:
         journal_file.write_text(
             '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
             '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
             '{"timestamp":"2026-01-12T13:00:00Z","event":"Docked","StationName":"Test","StarSystem":"Sol","SystemAddress":10477373803}\n',
             encoding="utf-8",
         )
 
         await watcher._process_file(str(journal_file))
 
-        watcher.submitter.submit.assert_awaited_once()
-        message = watcher.submitter.submit.await_args.args[0]
+        # FSDJump and Docked both submitted (Docked gets StarPos from session_state)
+        assert watcher.submitter.submit.await_count == 2
+        # Find the Docked message
+        docked_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            msg = call.args[0]
+            if msg.get("message", {}).get("event") == "Docked":
+                docked_call = call
+                break
+        assert docked_call is not None
+        message = docked_call.args[0]
         assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
         # Docked should NOT have event_name override
-        assert watcher.submitter.submit.await_args.kwargs.get("event_name") is None
+        assert docked_call.kwargs.get("event_name") is None
 
     @pytest.mark.asyncio
     async def test_invalid_auxiliary_json_no_submission(self, watcher, tmp_path):
@@ -308,7 +336,6 @@ class TestAuxiliaryFileHandling:
         assert watcher._file_positions[str(journal_file)] == 4
         # FSDJump submit raises, Scan submit succeeds
         assert watcher.submitter.submit.await_count == 2
-    """Tests for _is_from_today."""
 
     def test_today_filename(self, watcher):
         from datetime import datetime, timezone
@@ -322,3 +349,239 @@ class TestAuxiliaryFileHandling:
 
     def test_invalid_filename(self, watcher):
         assert watcher._is_from_today("notajournal.log") is False
+
+
+class TestDedicatedSchemaRouting:
+    """Tests for dedicated EDDN schema routing in the watcher."""
+
+    @pytest.mark.asyncio
+    async def test_fss_signal_discovered_routes_to_batcher(self, watcher, tmp_path):
+        """FSSSignalDiscovered should be batched, not immediately submitted."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:03:00Z","event":"FSSSignalDiscovered","SystemAddress":10477373803,"SignalName":"$MULTIPLAYER_SCENARIO42_TITLE;","StarSystem":"Sol","StarPos":[0,0,0]}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # FSDJump should be submitted, but FSSSignalDiscovered should NOT
+        # (it goes to the batcher instead)
+        submit_calls = watcher.submitter.submit.await_args_list
+        submitted_events = []
+        for call in submit_calls:
+            msg = call.args[0]
+            event_name = call.kwargs.get("event_name") or msg.get("message", {}).get("event", "unknown")
+            submitted_events.append(event_name)
+        assert "FSDJump" in submitted_events
+        assert "FSSSignalDiscovered" not in submitted_events
+
+    @pytest.mark.asyncio
+    async def test_fss_discovery_scan_triggers_flush_and_uses_dedicated_schema(self, watcher, tmp_path):
+        """FSSDiscoveryScan should flush the signal batcher and submit to fssdiscoveryscan/1."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:03:00Z","event":"FSSSignalDiscovered","SystemAddress":10477373803,"SignalName":"$Signal1;","StarSystem":"Sol","StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:03:05Z","event":"FSSSignalDiscovered","SystemAddress":10477373803,"SignalName":"$Signal2;","StarSystem":"Sol","StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T12:15:00Z","event":"FSSDiscoveryScan","StarSystem":"Sol","SystemAddress":10477373803,"BodyCount":21,"NonBodyCount":42}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Should have 3 submissions: FSDJump, FSSSignalDiscovered batch, FSSDiscoveryScan
+        assert watcher.submitter.submit.await_count == 3
+        # Find the FSSDiscoveryScan and batch submissions
+        schema_refs = [call.args[0]["$schemaRef"] for call in watcher.submitter.submit.await_args_list]
+        event_names = []
+        for call in watcher.submitter.submit.await_args_list:
+            event_names.append(call.kwargs.get("event_name") or call.args[0].get("message", {}).get("event", "unknown"))
+
+        # FSSDiscoveryScan should use fssdiscoveryscan/1
+        assert EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF in schema_refs
+        # FSSSignalDiscovered batch should use fsssignaldiscovered/1
+        assert EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF in schema_refs
+        # Event name for batch should be FSSSignalDiscovered
+        assert "FSSSignalDiscovered" in event_names
+        # Event name for FSSDiscoveryScan should be FSSDiscoveryScan
+        assert "FSSDiscoveryScan" in event_names
+
+    @pytest.mark.asyncio
+    async def test_approach_settlement_uses_dedicated_schema(self, watcher, tmp_path):
+        """ApproachSettlement should submit to approachsettlement/1 schema."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:01:20Z","event":"ApproachSettlement","StarSystem":"Sol","SystemAddress":10477373803,"StationName":"Galileo","BodyID":1,"BodyName":"Earth","MarketID":128666762,"Latitude":42.0,"Longitude":-7.0}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Find the ApproachSettlement submission
+        approach_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "ApproachSettlement":
+                approach_call = call
+                break
+        assert approach_call is not None
+        message = approach_call.args[0]
+        assert message["$schemaRef"] == EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF
+
+    @pytest.mark.asyncio
+    async def test_codex_entry_uses_dedicated_schema(self, watcher, tmp_path):
+        """CodexEntry should submit to codexentry/1 schema."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"CodexEntry","SystemAddress":10477373803,"Name":"$Codex_Ent_Name_1;","Region":"TestRegion","EntryID":123,"BodyID":1,"BodyName":"Earth"}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Find the CodexEntry submission
+        codex_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "CodexEntry":
+                codex_call = call
+                break
+        assert codex_call is not None
+        message = codex_call.args[0]
+        assert message["$schemaRef"] == EDDN_CODEXENTRY_1_SCHEMA_REF
+
+    @pytest.mark.asyncio
+    async def test_saa_signals_found_routes_through_journal1(self, watcher, tmp_path):
+        """SAASignalsFound should go through journal/1 (it's in the journal/1 enum)."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:05:00Z","event":"SAASignalsFound","StarSystem":"Sol","SystemAddress":10477373803}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Find the SAASignalsFound submission
+        saa_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            msg = call.args[0]
+            if msg.get("message", {}).get("event") == "SAASignalsFound":
+                saa_call = call
+                break
+        assert saa_call is not None
+        message = saa_call.args[0]
+        assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
+
+    @pytest.mark.asyncio
+    async def test_approach_body_not_reportable(self, watcher, tmp_path):
+        """ApproachBody has no EDDN schema and should not be submitted."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Earth"}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Only FSDJump should be submitted, not ApproachBody
+        assert watcher.submitter.submit.await_count == 1
+        msg = watcher.submitter.submit.await_args.args[0]
+        assert msg["message"]["event"] == "FSDJump"
+
+    @pytest.mark.asyncio
+    async def test_leave_body_not_reportable(self, watcher, tmp_path):
+        """LeaveBody has no EDDN schema and should not be submitted."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"LeaveBody","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Earth"}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        assert watcher.submitter.submit.await_count == 1
+        msg = watcher.submitter.submit.await_args.args[0]
+        assert msg["message"]["event"] == "FSDJump"
+
+    @pytest.mark.asyncio
+    async def test_saa_scan_complete_not_reportable(self, watcher, tmp_path):
+        """SAAScanComplete has no EDDN schema and should not be submitted."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"SAAScanComplete","BodyName":"Earth","SystemAddress":10477373803}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        assert watcher.submitter.submit.await_count == 1
+        msg = watcher.submitter.submit.await_args.args[0]
+        assert msg["message"]["event"] == "FSDJump"
+
+    @pytest.mark.asyncio
+    async def test_fsdjump_triggers_signal_batch_flush(self, watcher, tmp_path):
+        """FSDJump is a flush trigger AND a system change event."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:03:00Z","event":"FSSSignalDiscovered","SystemAddress":10477373803,"SignalName":"$Signal1;","StarSystem":"Sol","StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:05:00Z","event":"FSDJump",'
+            '"StarSystem":"Alpha Centauri","SystemAddress":55230754,'
+            '"StarPos":[1,2,3]}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Should have: FSDJump(Sol), FSSSignalDiscovered(batch flushed by FSDJump), FSDJump(Alpha Centauri)
+        assert watcher.submitter.submit.await_count == 3
+        # Verify the batch submission used fsssignaldiscovered/1
+        batch_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "FSSSignalDiscovered":
+                batch_call = call
+                break
+        assert batch_call is not None
+        assert batch_call.args[0]["$schemaRef"] == EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF
