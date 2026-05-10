@@ -4,20 +4,9 @@ Tests the _parse_libraryfolders_vdf method with sample VDF content.
 """
 
 import pytest
+from conftest import MockSettings
 
 from src.modules.path_finder import JournalPathFinder
-
-
-class MockSettings:
-    """Mock PluginSettings for testing."""
-    def __init__(self):
-        self._data = {}
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    async def set(self, key, value):
-        self._data[key] = value
 
 
 @pytest.fixture

@@ -7,24 +7,20 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from conftest import MockSettings
 
 from main import Plugin
 from src.modules.activity_log import ActivityLog
+from src.modules.constants import (
+    EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_JOURNAL_1_SCHEMA_REF,
+    EDDN_OUTFITTING_2_SCHEMA_REF,
+    EDDN_SHIPYARD_2_SCHEMA_REF,
+)
 from src.modules.parser import JournalParser
 from src.modules.submitter import EDDNSubmitter
 from src.modules.validator import EDDNValidator
 from src.modules.watcher import JournalWatcher
-
-
-class MockSettings:
-    def __init__(self):
-        self._data = {"uploader_id": "test-integration", "software_version": "0.1.0", "poll_interval": 10}
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    async def set(self, key, value):
-        self._data[key] = value
 
 
 class TestEndToEndPipeline:
@@ -33,7 +29,7 @@ class TestEndToEndPipeline:
     @pytest.mark.asyncio
     async def test_process_journal_fixture_file(self, tmp_path):
         """Process a real journal fixture file through the pipeline."""
-        settings = MockSettings()
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
         parser = JournalParser()
         validator = EDDNValidator()
         submitter = EDDNSubmitter(settings)
@@ -49,7 +45,7 @@ class TestEndToEndPipeline:
         # Patch submitter to not actually POST
         submitted_messages = []
 
-        async def mock_submit(message):
+        async def mock_submit(message, event_name=None):
             submitted_messages.append(message)
             return True
 
@@ -77,6 +73,120 @@ class TestEndToEndPipeline:
             assert "odyssey" in msg["message"]
 
     @pytest.mark.asyncio
+    async def test_market_auxiliary_pipeline(self, tmp_path, copy_fixture):
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
+        parser = JournalParser()
+        validator = EDDNValidator()
+        submitter = EDDNSubmitter(settings)
+        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+
+        copy_fixture("Market.json")
+        submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":false}\n'
+            '{"timestamp":"2026-01-12T13:05:00Z","event":"Market","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        submitter.submit.assert_awaited_once()
+        message = submitter.submit.await_args.args[0]
+        assert message["$schemaRef"] == EDDN_COMMODITY_3_SCHEMA_REF
+        assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
+        assert message["message"]["stationName"] == "Jameson Memorial"
+        assert len(message["message"]["commodities"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_outfitting_auxiliary_pipeline(self, tmp_path, copy_fixture):
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
+        parser = JournalParser()
+        validator = EDDNValidator()
+        submitter = EDDNSubmitter(settings)
+        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+
+        copy_fixture("Outfitting.json")
+        submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T13:05:00Z","event":"Outfitting","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        submitter.submit.assert_awaited_once()
+        message = submitter.submit.await_args.args[0]
+        assert message["$schemaRef"] == EDDN_OUTFITTING_2_SCHEMA_REF
+        assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
+        # EDDN outfitting/2: modules is array of strings
+        assert message["message"]["modules"] == [
+            "int_cargo_rack_size6_class1",
+            "int_shieldgenerator_size8_class5_fast",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_shipyard_auxiliary_pipeline(self, tmp_path, copy_fixture):
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
+        parser = JournalParser()
+        validator = EDDNValidator()
+        submitter = EDDNSubmitter(settings)
+        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+
+        copy_fixture("Shipyard.json")
+        submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":false,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T13:05:00Z","event":"Shipyard","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        submitter.submit.assert_awaited_once()
+        message = submitter.submit.await_args.args[0]
+        assert message["$schemaRef"] == EDDN_SHIPYARD_2_SCHEMA_REF
+        assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
+        # EDDN shipyard/2: ships is array of strings
+        assert message["message"]["ships"] == ["sidey", "eagle"]
+
+    @pytest.mark.asyncio
+    async def test_navroute_auxiliary_pipeline(self, tmp_path, copy_fixture):
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
+        parser = JournalParser()
+        validator = EDDNValidator()
+        submitter = EDDNSubmitter(settings)
+        watcher = JournalWatcher(settings=settings, parser=parser, validator=validator, submitter=submitter)
+
+        copy_fixture("NavRoute.json")
+        submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"NavRoute"}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        submitter.submit.assert_awaited_once()
+        message = submitter.submit.await_args.args[0]
+        assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
+        assert message["message"]["event"] == "NavRoute"
+        assert len(message["message"]["Route"]) == 2
+
+    @pytest.mark.asyncio
     async def test_catch_up_on_restart(self, tmp_path):
         """
         Test catch-up scenario:
@@ -85,7 +195,7 @@ class TestEndToEndPipeline:
         3. New content is added
         4. Watcher restarts and catches up
         """
-        settings = MockSettings()
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
         parser = JournalParser()
         validator = EDDNValidator()
         submitter = EDDNSubmitter(settings)
@@ -93,7 +203,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message):
+        async def mock_submit(message, event_name=None):
             submitted_messages.append(message)
             return True
 
@@ -129,7 +239,7 @@ class TestEndToEndPipeline:
     @pytest.mark.asyncio
     async def test_field_stripping_in_pipeline(self, tmp_path):
         """Verify disallowed fields are stripped in the full pipeline."""
-        settings = MockSettings()
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
         parser = JournalParser()
         validator = EDDNValidator()
         submitter = EDDNSubmitter(settings)
@@ -137,7 +247,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message):
+        async def mock_submit(message, event_name=None):
             submitted_messages.append(message)
             return True
 
@@ -148,21 +258,26 @@ class TestEndToEndPipeline:
         journal_file.write_text(
             '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
             '{"timestamp":"2026-01-12T12:01:00Z","event":"LoadGame","Horizons":true,"Odyssey":true}\n'
-            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":15,"FuelUsed":2.3,"FuelLevel":28.6,"ActiveFine":true,"Crew":["NPC1"]}\n',
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":15,"FuelUsed":2.3,"FuelLevel":28.6,"ActiveFine":true,"Wanted":true,"Government_Localised":"Democracy"}\n',
         )
 
         await watcher._process_file(str(journal_file))
 
-        # Check that ActiveFine and Crew were stripped
+        # Check that disallowed fields and _Localised keys were stripped
         fsdjump_msg = next(m for m in submitted_messages if m["message"]["event"] == "FSDJump")
         assert "ActiveFine" not in fsdjump_msg["message"]
-        assert "Crew" not in fsdjump_msg["message"]
+        assert "Wanted" not in fsdjump_msg["message"]
+        assert "Government_Localised" not in fsdjump_msg["message"]
+        # JumpDist, FuelUsed, FuelLevel are also disallowed by EDDN schema
+        assert "JumpDist" not in fsdjump_msg["message"]
+        assert "FuelUsed" not in fsdjump_msg["message"]
+        assert "FuelLevel" not in fsdjump_msg["message"]
         assert fsdjump_msg["message"]["StarSystem"] == "Sol"
 
     @pytest.mark.asyncio
     async def test_empty_journal_dir(self, tmp_path):
         """Watching an empty journal directory should not crash."""
-        settings = MockSettings()
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
         parser = JournalParser()
         validator = EDDNValidator()
         submitter = EDDNSubmitter(settings)
@@ -170,7 +285,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message):
+        async def mock_submit(message, event_name=None):
             submitted_messages.append(message)
             return True
 
@@ -184,8 +299,7 @@ class TestEndToEndPipeline:
     async def test_start_watcher_blocked_when_disabled(self):
         """Plugin.start_watcher returns disabled error when enabled=False."""
         plugin = Plugin()
-        settings = MockSettings()
-        settings._data["enabled"] = False
+        settings = MockSettings(initial_data={"enabled": False})
 
         plugin.settings = settings
         plugin.watcher = MagicMock()
@@ -203,7 +317,7 @@ class TestEndToEndPipeline:
     @pytest.mark.asyncio
     async def test_get_recent_activity_after_simulated_uploads(self, tmp_path):
         """Verify get_recent_activity callable returns expected entries after simulated uploads."""
-        settings = MockSettings()
+        settings = MockSettings(initial_data={"uploader_id": "test-integration", "software_version": "0.1.0"})
         activity_log = ActivityLog()
         parser = JournalParser()
         validator = EDDNValidator()
@@ -212,7 +326,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message):
+        async def mock_submit(message, event_name=None):
             submitted_messages.append(message)
             return True
 

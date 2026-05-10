@@ -1,170 +1,154 @@
-# ED Journal Monitor Decky Plugin — Plan
+# Plan: Phase 1 & 2 — EDDN Market/Outfitting/Shipyard + Expanded Journal Events
 
-## Status: Implementation Complete
+## Goal
+Extend the ED Journal Monitor Decky plugin to send the same EDDN data that EDMC does (commodity prices, outfitting, shipyard, plus additional journal events), making it a functional replacement for EDMC on Steam Deck.
 
-## Recent Change: reviewer-followups-correctness-tests-cleanup
-Implemented reviewer follow-ups for correctness, test robustness, and cleanup.
+## Status (2026-05-10)
+- Phase 1 implemented: Market/Outfitting/Shipyard auxiliary files are transformed and submitted to commodity/3, outfitting/2, shipyard/2.
+- Phase 2 implemented: Additional journal/1 events are reportable and validated, with NavRoute sourced from `NavRoute.json`.
+- Test coverage added for constants, parser auxiliary parsing, validator transforms/validation, watcher auxiliary handling, and integration flow.
 
-### What Changed
-- `src/api.ts` — New shared frontend RPC callables/types wrapper used by UI and lifecycle code
-- `src/index.tsx` + `src/Content.tsx` — Switched to shared API module; improved resume comment accuracy; replaced unstable list index keys with stable activity keys
-- `main.py` — Removed redundant `last_upload_event` assignment in `get_status()` payload
-- `src/modules/path_finder.py` — Cleaned process-name set formatting and documented `/proc/*/comm` truncation behavior
-- `tests/test_integration.py` — Replaced watcher-level disabled test with plugin-level `Plugin.start_watcher()` contract test
-- `tests/test_ed_already_running.py` — Made mtime boundary tests deterministic by patching `time.time`
-- `tests/test_path_finder_process.py` — Simplified process-detection tests with focused fake `/proc` entries (less brittle mocking)
-- `.github/workflows/ci.yml` — CI now runs frontend lint/typecheck and backend ruff lint + pytest
-- `AGENTS.md` — Updated test count metadata to 126
-- `README.md` — Added lint/typecheck commands in development docs
+## Phase 1: Commodity/Outfitting/Shipyard EDDN Schemas
 
-### Verification
-- `npm run lint:ts`
-- `PYTHONPATH=. .venv/bin/python -m pytest tests/ -v`
+### 1.1 Refactor validator to support multiple schemas
+- **Current**: `EDDNValidator` hardcodes `journal/1` schema in `transform()`
+- **Change**: Split validation from schema-specific transformation. Add `transform_commodity()`, `transform_outfitting()`, `transform_shipyard()` methods, each producing the correct `$schemaRef` and message payload.
+- **File**: `src/modules/validator.py`
+  - Keep existing `validate()` / `transform()` for journal/1 (backward compatible)
+  - Add `validate_auxiliary(event_type) -> bool` to check Market/Outfitting/Shipyard triggers
+  - Add `transform_commodity(market_data, session_state) -> dict` → commodity/3 schema
+  - Add `transform_outfitting(outfitting_data, session_state) -> dict` → outfitting/2 schema
+  - Add `transform_shipyard(shipyard_data, session_state) -> dict` → shipyard/2 schema
 
-## Recent Change: fix-plugin-import-path-and-game-detection
-Fixed plugin failing to start on-device (ModuleNotFoundError) and improved ED game detection.
+### 1.2 Add auxiliary file reader to parser
+- **Current**: `JournalParser` only parses journal lines via `parse_line()`
+- **Change**: Add `parse_auxiliary_file(filepath) -> dict | None` to read standalone JSON files (Market.json, Outfitting.json, Shipyard.json)
+- **File**: `src/modules/parser.py`
+  - Add `parse_auxiliary_file(filepath: str) -> dict | None`
+  - Returns parsed JSON dict or None on failure
 
-### What Changed
-- `main.py` — Added `sys.path` manipulation so `from src.modules...` resolves when Decky deploys to `bin/src/modules/`; fixed broken `create_diagnostics` method; added `Optional` type compat
-- `package.json` — Fixed package script: `cp -r src/modules out/.../bin/` → `cp -r src/modules out/.../bin/src/` to match import paths
-- `src/index.tsx` — Removed custom `declare const SteamClient` that shadowed `@decky/ui` global; added diagnostic logging for all `AppLifetimeNotification` events; added registration success/failure logging
-- `src/modules/path_finder.py` — Added `_check_ed_process()` scanning `/proc/*/comm` for ED processes; `is_ed_likely_running()` now checks process list first, falls back to journal mtime; fixed process name detection (kernel truncates `/proc/PID/comm` to 15 chars, so `EliteDangerous64` → `EliteDangerous6`)
-- `tests/test_path_finder_process.py` — 8 new tests for process-based detection
+### 1.3 Add auxiliary file handling to watcher
+- **Current**: `JournalWatcher` only globs `Journal*.log` and processes line-by-line
+- **Change**: When Market/Outfitting/Shipyard journal event is detected, read the corresponding `.json` file and submit via the appropriate schema
+- **File**: `src/modules/watcher.py`
+  - In `_process_reportable_event()` or a new handler: detect Market/Outfitting/Shipyard events
+  - Read the auxiliary JSON file from `self._journal_path`
+  - Call the appropriate validator transform method
+  - Submit the resulting message
+  - Add mapping: `Market` → `Market.json`, `Outfitting` → `Outfitting.json`, `Shipyard` → `Shipyard.json`
 
-### Root Cause (Primary)
-Plugin never started on-device. The `package` script deployed modules to `bin/modules/` but `main.py` imported `from src.modules...`. Every startup failed with `ModuleNotFoundError: No module named 'src'`.
+### 1.4 Expand constants
+- **File**: `src/modules/constants.py`
+  - Add Market, Outfitting, Shipyard to `REPORTABLE_EVENTS`
+  - Add auxiliary file name mapping: `AUXILIARY_FILES = {"Market": "Market.json", "Outfitting": "Outfitting.json", "Shipyard": "Shipyard.json"}`
+  - Add EDDN schema ref constants for commodity/3, outfitting/2, shipyard/2
+  - Add commodity-specific disallowed fields (if any)
 
-### Root Cause (Secondary)
-`/proc/PID/comm` truncates to 15 chars. The detection code looked for `EliteDangerous64` (16 chars) which never matched the actual comm value `EliteDangerous6`.
+### 1.5 EDDN schema details (from research)
+- **commodity/3**: Requires `systemName`, `stationName`, `marketId`, `commodities[]` (each with `name`, `meanPrice`, `buyPrice`, `stock`, `stockBracket`, `sellPrice`, `demand`, `demandBracket`), `horizons`, `odyssey`. Items with `stockBracket==0` and `demandBracket==0` should be excluded (per EDDN spec).
+- **outfitting/2**: Requires `systemName`, `stationName`, `marketId`, `modules[]` (each with `name`), `horizons`, `odyssey`
+- **shipyard/2**: Requires `systemName`, `stationName`, `marketId`, `ships[]` (each with `shipType`), `horizons`, `odyssey`
+- All use the same EDDN upload endpoint
 
-### Test Results
-125 tests, all passing (was 117).
+## Phase 2: Expand Journal/1 Event Coverage
 
-### On-Device Verification
-Plugin now starts successfully, detects ED via /proc scan, finds journal path via VDF scan. SSL cert issue discovered (separate problem).
+### 2.1 Add additional reportable events
+- **Current**: FSDJump, Scan, Location, Docked, FSSDiscoveryScan
+- **Add**: NavRoute, ApproachBody, LeaveBody, ApproachSettlement, CarrierJump, FSSSignalDiscovered, SAAScanComplete
+- **File**: `src/modules/constants.py` — expand `REPORTABLE_EVENTS`
+- **File**: `src/modules/validator.py` — add `REQUIRED_FIELDS` entries for new events
 
-## Previous Change: already-running-game-detection
-Fixed bug where ED was not detected if already running when the plugin loaded.
+### 2.2 Required fields for new events (from EDDN journal/1 spec)
+- `NavRoute`: timestamp, event (already has Routes[] with SystemAddress)
+- `ApproachBody`: timestamp, StarSystem, SystemAddress, BodyName
+- `LeaveBody`: timestamp, StarSystem, SystemAddress, BodyName
+- `ApproachSettlement`: timestamp, StarSystem, SystemAddress, StationName
+- `CarrierJump`: timestamp, StarSystem, SystemAddress, StarPos
+- `FSSSignalDiscovered`: timestamp, SystemAddress, SignalName
+- `SAAScanComplete`: timestamp, BodyName, SystemAddress
 
-### What Changed
-- `src/modules/path_finder.py` — Added `is_ed_likely_running()` method that checks for journal files modified within the last 5 minutes
-- `main.py` — Added `check_ed_running` callable that probes backend for already-running ED
-- `src/index.tsx` — Added startup probe: after registering lifecycle listeners, calls `check_ed_running()` and triggers watcher start if ED is already running
-- `tests/test_ed_already_running.py` — 13 new tests covering `is_ed_likely_running()` and `check_ed_running`
+### 2.3 NavRoute.json auxiliary file
+- NavRoute journal event triggers reading `NavRoute.json` for the full route data
+- Similar pattern to Market.json — the journal event is a pointer, full data in the JSON file
+- Add to `AUXILIARY_FILES` mapping and watcher handling
 
-### Root Cause
-`RegisterForAppLifetimeNotifications` only fires on state changes. If ED was already running when the plugin loaded (Decky restart, plugin update, Steam Deck reboot), no notification was fired and ED went undetected.
+## Test-First Implementation Order
 
-### Test Results
-117 tests, all passing (was 104).
+### Tests to write FIRST (before any implementation changes)
 
-## Previous Change: upload-status-and-errors
-Added activity log, real-time error display, and enhanced upload status to the plugin.
+1. **test_validator.py** — New test classes:
+   - `TestValidateAuxiliary` — validate_auxiliary() for Market, Outfitting, Shipyard
+   - `TestTransformCommodity` — commodity/3 message construction from Market.json data
+   - `TestTransformOutfitting` — outfitting/2 message construction from Outfitting.json data
+   - `TestTransformShipyard` — shipyard/2 message construction from Shipyard.json data
+   - `TestValidateNewJournalEvents` — validate() for NavRoute, ApproachBody, etc.
+   - `TestTransformNewJournalEvents` — transform() for new journal/1 events
 
-### What Changed
-- New `src/modules/activity_log.py` — in-memory circular buffer (deque maxlen=50) tracking upload attempts
-- `src/modules/submitter.py` — now accepts optional `ActivityLog`, records success/failure entries, includes `event_name` in `upload_success` event and `last_upload_event` in `get_stats()`
-- `main.py` — wires `ActivityLog`, adds `get_recent_activity` callable
-- `src/Content.tsx` — new "Recent Errors" and "Recent Activity" panel sections, enhanced "Last Upload" with event name
-- `src/types.d.ts` — added `ActivityEntry`, `UploadSuccessEvent.event_name`, `StatusUpdateEvent.last_upload_event`
+2. **test_parser.py** — New test class:
+   - `TestParseAuxiliaryFile` — parse_auxiliary_file() for Market.json, Outfitting.json, Shipyard.json, NavRoute.json
 
-### Test Results
-96 tests, all passing (was 67).
+3. **test_watcher.py** — New tests:
+   - `TestAuxiliaryFileHandling` — Market event triggers Market.json read + commodity/3 submission
+   - `TestOutfittingFileHandling` — same pattern
+   - `TestShipyardFileHandling` — same pattern
+   - `TestNavRouteFileHandling` — NavRoute event triggers NavRoute.json read + journal/1 submission
 
-## What Was Built
-A Decky plugin that monitors Elite Dangerous journal files and submits events to EDDN. All 50 tasks from the OpenSpec change are complete.
+4. **test_integration.py** — New integration tests:
+   - Market data end-to-end pipeline
+   - Outfitting data end-to-end pipeline
+   - Shipyard data end-to-end pipeline
+   - NavRoute data end-to-end pipeline
 
-## Components Implemented
-1. **Project scaffold** — Decky plugin template customized, builds clean
-2. **Journal path detection** — VDF parser + compatdata scanner + settings cache + manual fallback
-3. **Journal parser** — JSON line parsing, reportable event filtering, LoadGame/Fileheader handling
-4. **Journal watcher** — Polling loop, position tracking, incremental reads, catch-up logic
-5. **EDDN submission** — Message construction, field stripping, horizons/odyssey augmentation, HTTP POST with retry
-6. **Frontend game lifecycle** — SteamClient AppLifetimeNotifications for ED 359320, suspend/resume handling
-7. **Frontend UI panel** — Status, upload stats, enable/disable toggle, manual path input, uploader ID config
-8. **Integration tests** — End-to-end pipeline, catch-up, SD card, no-root verification
+5. **test_constants.py** — New file:
+   - Verify REPORTABLE_EVENTS includes all expected events
+   - Verify AUXILIARY_FILES mapping is correct
+   - Verify schema ref constants
 
-## Test Results
-67 tests, all passing.
+6. **Fixtures** — Add test fixture files:
+   - `Market.json` — realistic commodity data
+   - `Outfitting.json` — realistic module data
+   - `Shipyard.json` — realistic ship data
+   - `NavRoute.json` — realistic route data
+   - Journal lines with Market, Outfitting, Shipyard, NavRoute events
 
-## OpenSpec Change
-- Change: `ed-journal-monitor-decky` at `openspec/changes/ed-journal-monitor-decky/`
-- All artifacts complete (proposal, design, specs, tasks)
+### Implementation order (after tests)
+1. `constants.py` — Add new events, mappings, schema refs
+2. `parser.py` — Add `parse_auxiliary_file()`
+3. `validator.py` — Add auxiliary transforms + new journal event required fields
+4. `watcher.py` — Add auxiliary file handling + new event processing
+5. Run all tests — must pass
 
-## Next Steps
-- Test on actual Steam Deck hardware
-- Publish to Decky plugin store
-- Add commodity/3 and outfitting/2 EDDN schemas as future feature
+## Acceptance Criteria
+- All existing tests continue to pass (backward compatible) — now 171 total
+- All new tests pass
+- commodity/3, outfitting/2, shipyard/2 schemas are correctly constructed
+- Market/Outfitting/Shipyard journal events trigger auxiliary file reads
+- NavRoute journal event triggers NavRoute.json read
+- New journal/1 events (ApproachBody, LeaveBody, etc.) are validated and submitted
+- ~~No changes to submitter.py~~ — submitter.py was modified to add:
+  - `_build_ssl_context()` (SSL cert fix for Decky's PyInstaller Python) — pre-existing on-device requirement
+  - `event_name` parameter on `submit()` — fixes "unknown" event name in activity log for auxiliary schemas
+  - HTTP error body logging improvement
+- No changes to frontend (this is backend-only for now)
 
----
-
-## Fix Plan: Verification WARNINGs & SUGGESTIONs
-
-### WARNING Fixes
-
-#### W1: Status text matches spec wording
-- **File**: `src/Content.tsx:124`
-- **Change**: `"🟢 Watching"` → `"🟢 Watching — uploading journal events"`
-- **Test**: No test needed (UI text only)
-
-#### W2: Test for enabled/disabled auto-start suppression
-- **Note**: This test depends on fixing CRITICAL issue #1 (frontend `handleAppStart` must check `enabled`). Tracking here as a test to add once that fix lands.
-- **File**: New test or extend `tests/test_integration.py`
-- **Change**: Add test that verifies when `enabled=False`, the watcher does not start even when ED launch is triggered
-- **Approach**: Since the enabled check is in the TypeScript frontend, this is best verified manually on-device. However, we can add a backend test verifying `set_enabled(False)` prevents `start_watcher` from succeeding (it already calls `stop_watcher` if running, but we should also gate `start_watcher` on `enabled`).
-- **Test**: Add test in `tests/test_integration.py`:
-  ```python
-  async def test_start_watcher_blocked_when_disabled(self):
-      # set enabled=False
-      # call start_watcher
-      # assert watcher is not running
-  ```
-
-### SUGGESTION Fixes
-
-#### S1: Deduplicate shared constants
-- **Files**: `src/modules/parser.py`, `src/modules/path_finder.py`
-- **Change**: Create `src/modules/constants.py` with `REPORTABLE_EVENTS` and `EDDN_DISALLOWED_FIELDS`, then import from there in both `parser.py` and `path_finder.py`
-- **Also update**: `src/modules/validator.py` already imports from `parser.py` — update that import too
-- **Test**: Run existing 67 tests to confirm no breakage
-
-#### S2: Replace inline `__import__("os")` with top-level import
-- **File**: `src/modules/path_finder.py:86-88`
-- **Change**: Add `import os` at top of file (after existing imports), replace `_get_home_dir` body with:
-  ```python
-  def _get_home_dir(self) -> str | None:
-      home = os.environ.get("DECKY_USER_HOME")
-      if not home:
-          home = os.path.expanduser("~")
-      return home
-  ```
-- **Test**: Run existing 67 tests to confirm no breakage
-
-#### S3: Add CI configuration for lint/typecheck
-- **Files**: New `.github/workflows/ci.yml`
-- **Change**: Add GitHub Action that runs:
-  1. `npm run lint:ts` (tsc + eslint)
-  2. `npm run lint:py` (ruff + pytest)
-- **Note**: Low priority — this is infrastructure, not a code bug
-
-### Execution Order
-1. ~~S1 (constants dedup) — clean refactor, makes S2 easier~~ ✅
-2. ~~S2 (os import) — trivial fix~~ ✅
-3. ~~W1 (status text) — trivial fix~~ ✅
-4. ~~W2 (enabled gate test) — requires backend `start_watcher` to check `enabled` setting~~ ✅
-5. S3 (CI) — optional, separate concern
-
-### Additional Fixes (from second verification)
-
-#### CRITICAL Fix: SD card cache preservation
-- **File**: `src/modules/path_finder.py:48-50`
-- **Change**: When `_validate_path` fails for a cached path, return `None` but do NOT clear `journal_path` from settings. This preserves the path for SD card reinsertion recovery.
-- **Old**: `await self.settings.set("journal_path", None)` on validation failure
-- **New**: `return None` with log message "Cached journal path temporarily unavailable"
-- **Test**: Added `test_cached_path_preserved_when_unavailable` in `tests/test_sdcard_and_root.py`
-
-#### WARNING Fix: Frontend enabled check on ED launch
-- **File**: `src/index.tsx:28-32`
-- **Change**: `handleAppStart` now calls `getStatus()` first and checks `status.enabled` before proceeding to `findJournalPath()` + `startWatcher()`
-- Also added: `startWatcher()` return value checked and logged on failure
-- **Impact**: When monitor is disabled, no unnecessary backend calls made on ED launch events
+## Implementation Status (2026-05-10)
+- Phase 1: ✅ Complete — commodity/3, outfitting/2, shipyard/2 schemas
+- Phase 2: ✅ Complete — 7 new journal/1 events + NavRoute.json auxiliary
+- Reviewer feedback (round 1) applied:
+  - Fixed event_name="unknown" bug for auxiliary schema submissions
+  - Added missing watcher test for Market event with no Market.json
+  - Added test for event_name override in submitter
+  - Updated AGENTS.md test count
+  - Added noqa comment for ruff PLC0415 in submitter.py
+  - All integration test mock functions updated for event_name kwarg
+- Adversarial review feedback (round 2) applied:
+  - **Fixed missing `timestamp` in all 3 auxiliary transforms** (EDDN required field)
+  - **Fixed outfitting/2 `modules` to be array of strings** (not objects)
+  - **Fixed shipyard/2 `ships` to be array of strings** (not objects)
+  - **Guard against empty arrays**: transforms return None when no items remain, watcher skips submission
+  - **Consolidated `AUXILIARY_FILES`** into structured dict with `filename`+`schema` keys; derived `AUXILIARY_SCHEMA_EVENTS` from it (single source of truth)
+  - **Extracted `MockSettings` to `conftest.py`** (was duplicated in 7 test files)
+  - **Extracted `copy_fixture`/`load_fixture` to `conftest.py`** (was duplicated in 3 test files)
+  - **Inlined `validate_auxiliary()`** — was a one-liner set membership check
+  - **Added edge-case tests**: empty commodities/modules/ships, invalid JSON through watcher, Docked not triggering auxiliary, NavRoute empty route, `_as_dict_list` unit tests, commodity[1] content verification
+  - 182 tests passing, all lint clean

@@ -4,19 +4,9 @@ Tests the _scan_libraries method with mock directory structures.
 """
 
 import pytest
+from conftest import MockSettings
 
 from src.modules.path_finder import JournalPathFinder
-
-
-class MockSettings:
-    def __init__(self):
-        self._data = {}
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    async def set(self, key, value):
-        self._data[key] = value
 
 
 @pytest.fixture

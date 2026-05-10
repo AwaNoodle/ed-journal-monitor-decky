@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   PanelSection,
   PanelSectionRow,
@@ -41,6 +41,10 @@ const Content = (): JSX.Element => {
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
   const [lastUploadEvent, setLastUploadEvent] = useState<string | null>(null);
 
+  // Ref to track current uploaderId so the commander_detected listener
+  // doesn't use a stale closure value
+  const uploaderIdRef = useRef<string>("");
+
   // Load initial status
   useEffect((): void => {
     const loadStatus = async (): Promise<void> => {
@@ -58,6 +62,7 @@ const Content = (): JSX.Element => {
         const uid = status.uploader_id;
         setUploaderIdState(uid);
         setUploaderIdInput(uid);
+        uploaderIdRef.current = uid;
         setDetailedLoggingState(status.detailed_logging);
       } catch (e) {
         console.error("Failed to load status", e);
@@ -104,12 +109,14 @@ const Content = (): JSX.Element => {
     });
 
     // Auto-detect commander name from LoadGame for uploader ID
+    // Uses ref to check current value (avoids stale closure capturing initial "")
     const commanderListener = addEventListener("commander_detected", (data: { commander: string }): void => {
-      if (data.commander && !uploaderId) {
+      if (data.commander && !uploaderIdRef.current) {
         void (async (): Promise<void> => {
           await setUploaderId(data.commander);
           setUploaderIdState(data.commander);
           setUploaderIdInput(data.commander);
+          uploaderIdRef.current = data.commander;
         })();
       }
     });
@@ -167,6 +174,7 @@ const Content = (): JSX.Element => {
   const handleSetUploaderId = async (): Promise<void> => {
     await setUploaderId(uploaderIdInput);
     setUploaderIdState(uploaderIdInput);
+    uploaderIdRef.current = uploaderIdInput;
   };
 
   const handleRescan = async (): Promise<void> => {

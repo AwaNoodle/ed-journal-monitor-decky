@@ -7,6 +7,7 @@ Parses Elite Dangerous journal JSON lines and filters EDDN-reportable events.
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from src.modules.constants import REPORTABLE_EVENTS
 
@@ -69,6 +70,19 @@ class JournalParser:
     def is_reportable(self, event: ParsedEvent) -> bool:
         """Check if an event should be reported to EDDN."""
         return event.event_type in REPORTABLE_EVENTS
+
+    def parse_auxiliary_file(self, filepath: str) -> dict | None:
+        """Parse an auxiliary JSON file (Market/Outfitting/Shipyard/NavRoute)."""
+        try:
+            with Path(filepath).open(encoding="utf-8", errors="replace") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        return data
 
     def _handle_fileheader(self, data: dict) -> None:
         """Extract game version from Fileheader event."""

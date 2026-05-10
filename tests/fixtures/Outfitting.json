@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-01-12T13:05:00Z",
+  "event": "Outfitting",
+  "MarketID": 128666762,
+  "StationName": "Jameson Memorial",
+  "StarSystem": "Shinrarta Dezhra",
+  "Modules": [
+    {
+      "id": 1,
+      "Name": "int_cargo_rack_size6_class1",
+      "Ship": "",
+      "Category": "optional_internals"
+    },
+    {
+      "id": 2,
+      "Name": "int_shieldgenerator_size8_class5_fast",
+      "Ship": "",
+      "Category": "optional_internals"
+    }
+  ]
+}

@@ -7,20 +7,10 @@ import os
 from unittest.mock import patch
 
 import pytest
+from conftest import MockSettings
 
 from main import Plugin
 from src.modules.path_finder import JournalPathFinder
-
-
-class MockSettings:
-    def __init__(self):
-        self._data = {}
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    async def set(self, key, value):
-        self._data[key] = value
 
 
 @pytest.fixture

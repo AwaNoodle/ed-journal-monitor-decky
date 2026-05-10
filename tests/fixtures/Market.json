@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-01-12T13:05:00Z",
+  "event": "Market",
+  "MarketID": 128666762,
+  "StationName": "Jameson Memorial",
+  "StarSystem": "Shinrarta Dezhra",
+  "Items": [
+    {
+      "id": 1,
+      "Name": "agririmethe",
+      "Name_Localised": "Agronomic Treatment",
+      "Category": "Non-marketable",
+      "Category_Localised": "Non-marketable",
+      "BuyPrice": 0,
+      "SellPrice": 0,
+      "MeanPrice": 0,
+      "Stock": 0,
+      "Demand": 0,
+      "StockBracket": 0,
+      "DemandBracket": 0
+    },
+    {
+      "id": 2,
+      "Name": "hydrogenfuel",
+      "Name_Localised": "Hydrogen Fuel",
+      "Category": "Chemicals",
+      "BuyPrice": 90,
+      "SellPrice": 85,
+      "MeanPrice": 87,
+      "Stock": 1234567,
+      "Demand": 0,
+      "StockBracket": 3,
+      "DemandBracket": 0
+    },
+    {
+      "id": 3,
+      "Name": "drones",
+      "Name_Localised": "Limpet",
+      "Category": "Non-marketable",
+      "BuyPrice": 101,
+      "SellPrice": 95,
+      "MeanPrice": 99,
+      "Stock": 9999,
+      "Demand": 0,
+      "StockBracket": 3,
+      "DemandBracket": 0
+    }
+  ]
+}

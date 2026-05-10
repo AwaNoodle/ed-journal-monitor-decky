@@ -6,23 +6,13 @@ Tests that the path finder and watcher handle temporarily unavailable paths.
 from pathlib import Path
 
 import pytest
+from conftest import MockSettings
 
 from src.modules.parser import JournalParser
 from src.modules.path_finder import JournalPathFinder
 from src.modules.submitter import EDDNSubmitter
 from src.modules.validator import EDDNValidator
 from src.modules.watcher import JournalWatcher
-
-
-class MockSettings:
-    def __init__(self):
-        self._data = {}
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    async def set(self, key, value):
-        self._data[key] = value
 
 
 class TestSDCardEjection:

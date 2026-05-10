@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decky
+from src.modules.constants import AUXILIARY_FILES
 
 if TYPE_CHECKING:
     from src.modules.parser import JournalParser, ParsedEvent
@@ -134,11 +135,18 @@ class JournalWatcher:
                 # New file detected
                 decky.logger.info(f"New journal file detected: {log_file.name}")
                 self._known_files.add(filepath)
-            await self._process_file(filepath)
+            try:
+                await self._process_file(filepath)
+            except Exception as e:
+                # Per-file isolation: one bad file must not block others
+                decky.logger.error(f"Error processing {filepath}: {e}")
 
     async def _process_file(self, filepath: str) -> None:
         """
         Process a journal file, reading only new lines from last position.
+
+        Position is updated to the end of the file even if some events
+        fail to process, to avoid duplicate submissions on the next poll.
         """
         try:
             with Path(filepath).open(encoding="utf-8", errors="replace") as f:
@@ -155,34 +163,119 @@ class JournalWatcher:
 
         self._known_files.add(filepath)
 
-        for line in new_lines:
-            event = self.parser.parse_line(line)
-            if not event:
-                continue
-
-            # Auto-detect commander name from LoadGame for uploader ID
-            if event.event_type == "LoadGame" and self.parser.session_state.commander:
-                await decky.emit("commander_detected", {"commander": self.parser.session_state.commander})
-
-            if self.parser.is_reportable(event):
-                await self._process_reportable_event(event)
-
-        # Update position
+        # Always update position to prevent reprocessing on next poll,
+        # even if some events fail to process (avoids duplicate EDDN submissions).
         self._file_positions[filepath] = len(lines)
 
-    async def _process_reportable_event(self, event: ParsedEvent) -> None:
+        for line in new_lines:
+            try:
+                event = self.parser.parse_line(line)
+                if not event:
+                    continue
+
+                # Auto-detect commander name from LoadGame for uploader ID
+                if event.event_type == "LoadGame" and self.parser.session_state.commander:
+                    await decky.emit("commander_detected", {"commander": self.parser.session_state.commander})
+
+                if self.parser.is_reportable(event):
+                    await self._process_reportable_event(event, filepath)
+            except Exception as e:
+                # Per-event isolation: one bad event must not prevent
+                # processing of subsequent events in the same file.
+                decky.logger.error(f"Error processing event in {filepath}: {e}")
+
+    async def _process_reportable_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
         """Validate and submit a reportable event."""
-        # Validate
-        validated = self.validator.validate(event)
-        if not validated:
-            decky.logger.debug(f"Event validation failed: {event.event_type}")
-            return
+        event_to_validate = event
+        message: dict | None = None
+        is_auxiliary = event.event_type in AUXILIARY_FILES
 
-        # Transform to EDDN message
-        message = self.validator.transform(event, self.parser.session_state)
+        if is_auxiliary:
+            auxiliary_info = AUXILIARY_FILES[event.event_type]
+            auxiliary_filename = auxiliary_info["filename"]
+            auxiliary_schema = auxiliary_info["schema"]
 
-        # Submit
-        await self.submitter.submit(message)
+            auxiliary_data = self._read_auxiliary_data(auxiliary_filename, source_filepath)
+            if auxiliary_data is None:
+                decky.logger.debug(f"Auxiliary file missing/invalid for {event.event_type}: {auxiliary_filename}")
+                return
+
+            event_to_validate, message = self._prepare_auxiliary_submission(
+                event, auxiliary_data, auxiliary_schema,
+            )
+            if event_to_validate is None and message is None:
+                return
+
+        if message is None:
+            if event_to_validate is None:
+                return
+            validated = self.validator.validate(event_to_validate)
+            if not validated:
+                decky.logger.debug(f"Event validation failed: {event_to_validate.event_type}")
+                return
+            message = self.validator.transform(event_to_validate, self.parser.session_state)
+
+        # For auxiliary schemas (commodity/outfitting/shipyard), the message
+        # payload has no "event" key. Pass the trigger event name so the
+        # submitter can log it correctly instead of "unknown".
+        event_name_override = event.event_type if is_auxiliary else None
+        await self.submitter.submit(message, event_name=event_name_override)
+
+    def _prepare_auxiliary_submission(
+        self,
+        event: ParsedEvent,
+        auxiliary_data: dict,
+        auxiliary_schema: str,
+    ) -> tuple[ParsedEvent | None, dict | None]:
+        """Prepare transformed message or replacement event for auxiliary-based events."""
+        if auxiliary_schema == "journal":
+            # NavRoute: auxiliary data replaces the event payload, then goes
+            # through normal journal/1 validate+transform
+            auxiliary_timestamp = auxiliary_data.get("timestamp")
+            if not auxiliary_timestamp:
+                decky.logger.debug(f"{event.event_type} auxiliary data missing timestamp")
+                return None, None
+            return (
+                type(event)(
+                    raw=auxiliary_data,
+                    event_type=event.event_type,
+                    timestamp=auxiliary_timestamp,
+                ),
+                None,
+            )
+
+        # Non-journal auxiliary schemas: transform directly
+        transformers = {
+            "commodity": self.validator.transform_commodity,
+            "outfitting": self.validator.transform_outfitting,
+            "shipyard": self.validator.transform_shipyard,
+        }
+        transformer = transformers.get(auxiliary_schema)
+        if transformer is None:
+            decky.logger.debug(f"Unknown auxiliary schema: {auxiliary_schema}")
+            return event, None
+
+        message = transformer(auxiliary_data, self.parser.session_state)
+        if message is None:
+            # Transform returned None (e.g., empty commodities/modules/ships)
+            decky.logger.debug(f"Auxiliary transform produced no data for {event.event_type}")
+            return None, None
+        return None, message
+
+    def _read_auxiliary_data(self, auxiliary_filename: str, source_filepath: str | None) -> dict | None:
+        """Read an auxiliary JSON file from the journal directory."""
+        auxiliary_path = self._resolve_auxiliary_path(auxiliary_filename, source_filepath)
+        if auxiliary_path is None:
+            return None
+        return self.parser.parse_auxiliary_file(str(auxiliary_path))
+
+    def _resolve_auxiliary_path(self, auxiliary_filename: str, source_filepath: str | None) -> Path | None:
+        """Resolve an auxiliary filename to a full path in the journal directory."""
+        if source_filepath:
+            return Path(source_filepath).parent / auxiliary_filename
+        if self._journal_path:
+            return Path(self._journal_path) / auxiliary_filename
+        return None
 
     def _track_file_position(self, filepath: str) -> None:
         """Track a file's line count without processing it (for catch-up skipping)."""

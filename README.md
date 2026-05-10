@@ -6,7 +6,7 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 - **Hands-off operation**: Automatically detects when Elite Dangerous starts and stops, beginning/ending journal monitoring accordingly
 - **Auto-discovery**: Finds the ED journal directory by scanning Steam's library configuration — no manual setup required
-- **EDDN submission**: Validates and submits journal events (FSDJump, Scan, Location, Docked, FSSDiscoveryScan) to EDDN
+- **EDDN submission**: Validates and submits journal/1 events plus Market/Outfitting/Shipyard auxiliary schemas to EDDN
 - **No root access required**: All operations use user-accessible filesystem paths
 - **Steam Deck optimized**: Lightweight polling-based watcher, minimal resource usage
 - **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
@@ -112,7 +112,7 @@ npm run lint:py
 
 ## EDDN Event Coverage
 
-### Currently Supported (journal/1 schema)
+### journal/1 schema
 
 | Event | Description |
 |-------|-------------|
@@ -121,13 +121,21 @@ npm run lint:py
 | Location | Current location on load |
 | Docked | Station docking event |
 | FSSDiscoveryScan | Full system scan data |
+| NavRoute | Planned route data (from `NavRoute.json`) |
+| ApproachBody | Body approach telemetry |
+| LeaveBody | Body departure telemetry |
+| ApproachSettlement | Settlement approach telemetry |
+| CarrierJump | Fleet carrier jump arrival |
+| FSSSignalDiscovered | FSS signal discovery |
+| SAAScanComplete | Detailed surface scan completion |
 
-### Future Support
+### Auxiliary EDDN schemas
 
-| Schema | Events |
-|--------|--------|
-| commodity/3 | Market data |
-| outfitting/2 | Module availability |
+| Journal trigger | Auxiliary file | Schema |
+|-----------------|----------------|--------|
+| Market | `Market.json` | `commodity/3` |
+| Outfitting | `Outfitting.json` | `outfitting/2` |
+| Shipyard | `Shipyard.json` | `shipyard/2` |
 
 ## License
 

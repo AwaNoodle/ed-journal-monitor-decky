@@ -2,6 +2,8 @@
 Tests for the JournalParser module.
 """
 
+from pathlib import Path
+
 import pytest
 
 from src.modules.parser import JournalParser, ParsedEvent
@@ -96,7 +98,24 @@ class TestIsReportable:
     """Tests for is_reportable method."""
 
     def test_reportable_events(self, parser):
-        for event_type in ["FSDJump", "Scan", "Location", "Docked", "FSSDiscoveryScan"]:
+        reportable_events = [
+            "FSDJump",
+            "Scan",
+            "Location",
+            "Docked",
+            "FSSDiscoveryScan",
+            "Market",
+            "Outfitting",
+            "Shipyard",
+            "NavRoute",
+            "ApproachBody",
+            "LeaveBody",
+            "ApproachSettlement",
+            "CarrierJump",
+            "FSSSignalDiscovered",
+            "SAAScanComplete",
+        ]
+        for event_type in reportable_events:
             event = ParsedEvent(raw={}, event_type=event_type, timestamp="2026-01-12T12:00:00Z")
             assert parser.is_reportable(event) is True
 
@@ -137,3 +156,47 @@ class TestSessionState:
         """Default state assumes horizons and odyssey are true."""
         assert parser.session_state.horizons is True
         assert parser.session_state.odyssey is True
+
+
+class TestParseAuxiliaryFile:
+    def test_parse_market_file(self, parser):
+        fixture = Path(__file__).parent / "fixtures" / "Market.json"
+        data = parser.parse_auxiliary_file(str(fixture))
+
+        assert data is not None
+        assert data["event"] == "Market"
+        assert data["StationName"] == "Jameson Memorial"
+
+    def test_parse_outfitting_file(self, parser):
+        fixture = Path(__file__).parent / "fixtures" / "Outfitting.json"
+        data = parser.parse_auxiliary_file(str(fixture))
+
+        assert data is not None
+        assert data["event"] == "Outfitting"
+        assert len(data["Modules"]) == 2
+
+    def test_parse_shipyard_file(self, parser):
+        fixture = Path(__file__).parent / "fixtures" / "Shipyard.json"
+        data = parser.parse_auxiliary_file(str(fixture))
+
+        assert data is not None
+        assert data["event"] == "Shipyard"
+        assert len(data["PriceList"]) == 2
+
+    def test_parse_navroute_file(self, parser):
+        fixture = Path(__file__).parent / "fixtures" / "NavRoute.json"
+        data = parser.parse_auxiliary_file(str(fixture))
+
+        assert data is not None
+        assert data["event"] == "NavRoute"
+        assert len(data["Route"]) == 2
+
+    def test_missing_auxiliary_file(self, parser):
+        fixture = Path(__file__).parent / "fixtures" / "DoesNotExist.json"
+        assert parser.parse_auxiliary_file(str(fixture)) is None
+
+    def test_invalid_auxiliary_json(self, parser, tmp_path):
+        invalid_file = tmp_path / "broken.json"
+        invalid_file.write_text("{broken", encoding="utf-8")
+
+        assert parser.parse_auxiliary_file(str(invalid_file)) is None

@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-01-12T13:05:00Z",
+  "event": "Shipyard",
+  "MarketID": 128666762,
+  "StationName": "Jameson Memorial",
+  "StarSystem": "Shinrarta Dezhra",
+  "PriceList": [
+    {
+      "id": 1,
+      "ShipType": "sidey",
+      "ShipType_Localised": "Sidewinder",
+      "ShipPrice": 31000
+    },
+    {
+      "id": 2,
+      "ShipType": "eagle",
+      "ShipType_Localised": "Eagle",
+      "ShipPrice": 44000
+    }
+  ]
+}
