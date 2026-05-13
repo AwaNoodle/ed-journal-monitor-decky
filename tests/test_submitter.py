@@ -38,7 +38,7 @@ class TestMessageConstruction:
 
         assert result is True
         assert message["header"]["uploaderID"] == "test-uploader"
-        assert message["header"]["softwareName"] == "ed-journal-monitor-decky"
+        assert message["header"]["softwareName"] == "ED Journal Monitor Decky"
         assert message["header"]["softwareVersion"] == "0.1.0"
         assert "gatewayTimestamp" in message["header"]
 

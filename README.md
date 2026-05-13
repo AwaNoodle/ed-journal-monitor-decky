@@ -147,7 +147,7 @@ npm run lint:py
 
 Upload endpoint: `https://eddn.edcd.io:4430/upload/`
 
-Messages are sent with `softwareName: ed-journal-monitor-decky` and `softwareVersion: 0.1.0` in the EDDN header.
+Messages are sent with `softwareName: ED Journal Monitor Decky` and `softwareVersion: 0.1.0` in the EDDN header.
 
 ### journal/1 schema
 

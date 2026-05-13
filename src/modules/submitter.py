@@ -113,7 +113,7 @@ class EDDNSubmitter:
         # Populate header
         message["header"] = {
             "uploaderID": self.settings.get("uploader_id", ""),
-            "softwareName": "ed-journal-monitor-decky",
+            "softwareName": "ED Journal Monitor Decky",
             "softwareVersion": self.settings.get("software_version", "0.1.0"),
             "gatewayTimestamp": datetime.now(timezone.utc).isoformat(),
         }
