@@ -288,6 +288,19 @@ This caused EDDN 400 errors:
   - Preservation of signal-level position data even with mismatched SystemAddress
   - Batch discarding when no session_state and no signal position data
 - 343 tests passing, lint clean
+
+### Phase 8b: Fix Missing gameversion/gamebuild in Header (2026-05-14)
+
+Root cause: On first run (no `last_active`), the `_initial_scan` method only processed **today's** journal files via `_is_from_today()`. If ED was started on a previous day and still running, the current journal file would be from **yesterday** — and `_is_from_today()` would skip it. Since the `Fileheader` event (which sets `game_version`/`game_build` in session state) is always the first line of a journal file, skipping it meant these values stayed empty, causing `gameversion` and `gamebuild` to be omitted from all EDDN message headers.
+
+### Changes applied:
+- **watcher.py**: Changed `_initial_scan()` first-run logic to process **only the most recent journal file** instead of only today's files. This ensures the `Fileheader` is always parsed, setting `game_version`/`game_build`/`commander`/`horizons`/`odyssey` in session state. Older files are tracked for position but not processed (their events would be stale catch-up data anyway).
+- **tests/test_watcher.py**: Added `TestInitialScan` test class with 4 tests:
+  - `test_first_run_processes_most_recent_file`: verifies most recent file's Fileheader sets session state
+  - `test_first_run_skips_older_files`: verifies older files are tracked but not processed
+  - `test_catch_up_processes_modified_files`: verifies catch-up mode processes newer files
+  - `test_game_version_in_submission_header`: verifies `game_version`/`game_build` are passed to submitter
+- 347 tests passing, lint clean
 - **Sol FSDJump mystery resolved**: The `Sol` FSDJump events seen in EDDN are NOT from this plugin — they come from other EDDN contributors with different uploaderIDs. Zero FSDJump events to Sol exist in this device's journal files.
 
 ## Documentation Review (2026-05-10)

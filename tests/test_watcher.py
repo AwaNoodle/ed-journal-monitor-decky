@@ -419,6 +419,96 @@ class TestAuxiliaryFileHandling:
         assert watcher._is_from_today("notajournal.log") is False
 
 
+class TestInitialScan:
+    """Tests for _initial_scan file selection and session state initialization."""
+
+    @pytest.mark.asyncio
+    async def test_first_run_processes_most_recent_file(self, watcher, tmp_path):
+        """On first run (no last_active), only the most recent file is processed."""
+        # Create two journal files - yesterday's and today's
+        yesterday = tmp_path / "Journal.2026-01-11T120000.01.log"
+        yesterday.write_text(
+            '{"timestamp":"2026-01-11T12:00:00Z","event":"Fileheader","gameversion":"4.2.0.0","build":"r300000/r0"}\n'
+            '{"timestamp":"2026-01-11T12:01:15Z","event":"LoadGame","Commander":"OldCmdr","Horizons":true,"Odyssey":false}\n'
+        )
+
+        today = tmp_path / "Journal.2026-01-12T120000.01.log"
+        today.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader","gameversion":"4.3.0.1","build":"r322188/r0"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"NewCmdr","Horizons":true,"Odyssey":true}\n'
+        )
+
+        watcher._journal_path = str(tmp_path)
+        await watcher._initial_scan(last_active=None)
+
+        # Most recent file should have been processed (session state from today's file)
+        assert watcher.parser.session_state.game_version == "4.3.0.1"
+        assert watcher.parser.session_state.game_build == "r322188/r0"
+        assert watcher.parser.session_state.commander == "NewCmdr"
+        # Older file should have been tracked but not processed
+        assert str(yesterday) in watcher._file_positions
+        assert watcher._file_positions[str(yesterday)] == 2  # 2 lines tracked
+
+    @pytest.mark.asyncio
+    async def test_first_run_skips_older_files(self, watcher, tmp_path):
+        """On first run, older files are tracked for position but not processed."""
+        old = tmp_path / "Journal.2026-01-10T120000.01.log"
+        old.write_text(
+            '{"timestamp":"2026-01-10T12:00:00Z","event":"Fileheader","gameversion":"4.1.0.0","build":"r280105/r0"}\n'
+        )
+
+        recent = tmp_path / "Journal.2026-01-12T120000.01.log"
+        recent.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader","gameversion":"4.3.0.1","build":"r322188/r0"}\n'
+        )
+
+        watcher._journal_path = str(tmp_path)
+        await watcher._initial_scan(last_active=None)
+
+        # Game version from most recent file, not from old file
+        assert watcher.parser.session_state.game_version == "4.3.0.1"
+        # Old file tracked but not processed
+        assert str(old) in watcher._file_positions
+
+    @pytest.mark.asyncio
+    async def test_catch_up_processes_modified_files(self, watcher, tmp_path):
+        """On catch-up (with last_active), files modified after last_active are processed."""
+        watcher._journal_path = str(tmp_path)
+
+        # Create a file that was modified after last_active
+        recent = tmp_path / "Journal.2026-01-12T120000.01.log"
+        recent.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader","gameversion":"4.3.0.1","build":"r322188/r0"}\n'
+        )
+
+        # last_active is before the file's mtime
+        await watcher._initial_scan(last_active="2026-01-11T00:00:00+00:00")
+
+        assert watcher.parser.session_state.game_version == "4.3.0.1"
+
+    @pytest.mark.asyncio
+    async def test_game_version_in_submission_header(self, watcher, tmp_path, copy_fixture):
+        """Verify gameversion and gamebuild are passed to submitter."""
+        copy_fixture("Market.json")
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader","gameversion":"4.3.0.1","build":"r322188/r0"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T13:05:00Z","event":"Market","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        watcher.submitter.submit.assert_awaited_once()
+        # Verify game_version and game_build are passed through _submit()
+        call_kwargs = watcher.submitter.submit.await_args.kwargs
+        assert call_kwargs["game_version"] == "4.3.0.1"
+        assert call_kwargs["game_build"] == "r322188/r0"
+
+
 class TestDedicatedSchemaRouting:
     """Tests for dedicated EDDN schema routing in the watcher."""
 

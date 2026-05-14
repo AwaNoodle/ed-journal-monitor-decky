@@ -90,12 +90,22 @@ class JournalWatcher:
         decky.logger.info("Journal watcher stopped")
 
     async def _initial_scan(self, last_active: str | None) -> None:
-        """Process journal files on watcher start for catch-up."""
+        """Process journal files on watcher start for catch-up.
+
+        On first run (no last_active), processes the MOST RECENT journal file
+        to capture Fileheader/LoadGame session state (game version, commander,
+        horizons/odyssey flags), then tracks all other files for position only.
+        On catch-up (with last_active), processes files modified after the
+        last-active timestamp.
+        """
         journal_dir = Path(self._journal_path)
         if not journal_dir.is_dir():
             return
 
         log_files = sorted(journal_dir.glob("Journal*.log"))
+
+        if not log_files:
+            return
 
         for log_file in log_files:
             if last_active:
@@ -110,12 +120,20 @@ class JournalWatcher:
                         continue
                 except ValueError:
                     pass
-            # First run: only process today's files
-            elif not self._is_from_today(log_file.name):
-                self._track_file_position(str(log_file))
-                continue
 
-            await self._process_file(str(log_file))
+                await self._process_file(str(log_file))
+            elif log_file == log_files[-1]:
+                # First run: process ONLY the most recent file to capture
+                # Fileheader/LoadGame session state (game version, commander,
+                # horizons/odyssey). Older files' events would be stale, but
+                # the most recent file's Fileheader is essential for session
+                # state that affects all subsequent submissions (game_version,
+                # game_build, horizons, odyssey).
+                await self._process_file(str(log_file))
+            else:
+                # First run: older files are not processed, but track their
+                # position so the poll loop knows we've seen them.
+                self._track_file_position(str(log_file))
 
     async def _poll_loop(self) -> None:
         """Periodic polling loop."""
