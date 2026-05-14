@@ -173,8 +173,122 @@ Live Decky log: `EDDN client error 400: 'FSSSignalDiscovered' is not one of ['Do
 - Updated README.md: new EDDN schema tables, events not sent section, updated Known Limitations
 - Updated AGENTS.md: test count 330, signal_batcher in module list
 
+### Phase 4: Fix Commodity Name Sanitization (2026-05-13)
+
+Root cause: The plugin was sending raw journal commodity names (e.g., `$platinum_name;`) to EDDN instead of the clean format EDDN expects (e.g., `platinum`). ED Market Connector correctly strips the `$` prefix and `_name;` suffix.
+
+### Changes applied:
+- **validator.py**: Added `_sanitize_commodity_name()` function that strips `$` prefix and `_name;`/`;` suffix from commodity names; updated `transform_commodity()` to sanitize the `Name` field; added `statusFlags` passthrough from Market.json `StatusFlags`
+- **tests/fixtures/Market.json**: Updated to use realistic journal-format names (`$hydrogenfuel_name;`, `$drones_name;`), added gold item with `StatusFlags: ["powerplay"]`
+- **tests/test_validator.py**: Updated commodity assertions for 3 items (was 2), added gold item with statusFlags assertion, added `test_commodity_name_sanitization` unit test
+- **tests/test_integration.py** & **tests/test_watcher.py**: Updated commodity count assertion from 2 to 3
+
 ### Status:
 - Phase 3: ✅ Complete — 330 tests passing, all lint clean
+- Phase 4: ✅ Complete — 333 tests passing, all lint clean
+  - Commodity names sanitized (strip `$..._name;` format to clean EDDN names)
+  - Ship names sanitized (same transformation applied to Shipyard ShipType)
+  - Module names sanitized (same transformation applied to Outfitting module Name, no-op for already-clean names)
+  - Added `statusFlags` passthrough for commodity items with `StatusFlags` in Market.json
+  - Renamed `_sanitize_commodity_name` to `_sanitize_eddn_name` (broader scope)
+  - Updated test fixtures to use realistic journal-format names
+  - Added unit tests for name sanitization covering commodities, ships, modules, and edge cases
+  - Added `gameversion` and `gamebuild` to EDDN message header (from Fileheader journal event)
+  - Added `_submit()` helper in watcher to pass session state's game_version/game_build to submitter
+  - Added tests for game version in header (present when provided, absent when empty)
+
+### Phase 5: Fix Auxiliary File Race Condition (2026-05-13)
+
+Root cause: Elite Dangerous writes auxiliary JSON files (Market.json, Outfitting.json, Shipyard.json, NavRoute.json) asynchronously after the corresponding journal event line appears. The watcher was trying to read these files immediately, finding they didn't exist yet, and silently discarding the event. This meant outfitting (and potentially other auxiliary) messages were never sent to EDDN.
+
+### Changes applied:
+- **watcher.py**: Changed `_read_auxiliary_data()` from sync to async; added retry logic (5 attempts × 0.5s delay) to handle the race condition where the auxiliary file isn't written yet by ED
+- **watcher.py**: Upgraded log level from `debug` to `info` for the "auxiliary file still missing" message so it's visible in default logging
+- **tests/test_watcher.py**: Added `test_auxiliary_file_retries_on_missing` — verifies that when the first read fails but second succeeds, the event is still submitted
+- **tests/test_watcher.py**: Added `test_auxiliary_file_retries_exhausted` — verifies that when all retries fail, no submission occurs
+
+### Status:
+- Phase 5: ✅ Complete — 335 tests passing
+
+### Phase 7: Fix Outfitting Events Not Sent (2026-05-14)
+
+Root cause: `transform_outfitting()` in `validator.py` was reading outfitting items from the JSON key `"Modules"`, but Elite Dangerous's `Outfitting.json` file uses the key `"Items"`. This caused the module list to always be empty, making `transform_outfitting()` return `None` and silently dropping all outfitting events.
+
+The test fixture also used `"Modules"` (matching the code's wrong assumption), so tests passed despite the bug.
+
+### Changes applied:
+- **validator.py**: Changed `outfitting_data.get("Modules", [])` → `outfitting_data.get("Items", [])` in `transform_outfitting()`
+- **tests/fixtures/Outfitting.json**: Changed `"Modules"` → `"Items"` to match real game output
+- **tests/test_validator.py**: Updated all inline outfitting test data from `"Modules"` → `"Items"`
+- **tests/test_parser.py**: Updated assertion from `data["Modules"]` → `data["Items"]`
+- 336 tests passing
+
+### Phase 6: Fix EDDN Schema Validation Rejections (2026-05-14)
+
+Root cause: Three EDDN schema violations causing 400 errors on the live device:
+1. **FSSSignalDiscovered**: `FSS_SIGNAL_DISALLOWED_FIELDS` included `"timestamp"`, stripping it from individual signals. The fsssignaldiscovered/1 schema *requires* `timestamp` in each signal object.
+2. **FSSDiscoveryScan**: `transform_fss_discovery_scan()` renamed `SystemName` → `StarSystem`, but the fssdiscoveryscan/1 schema uses `SystemName` (same as the journal). Also, the `Progress` field was not stripped despite being disallowed by the schema.
+3. **NavRoute**: `transform_navroute()` augmented `StarSystem`, `StarPos`, and `SystemAddress` at message level, but the navroute/1 schema only allows `timestamp`, `event`, `Route`, `horizons`, `odyssey` at message level — those fields belong inside Route entries only.
+
+### Changes applied:
+- **constants.py**: Removed `"timestamp"` from `FSS_SIGNAL_DISALLOWED_FIELDS` (signals need it); added `"Progress"` to `EDDN_DISALLOWED_FIELDS` (it's disallowed by fssdiscoveryscan/1)
+- **validator.py**:
+  - `transform_fss_discovery_scan()`: Removed `SystemName` → `StarSystem` rename (fssdiscoveryscan/1 uses `SystemName`)
+  - `transform_navroute()`: Removed `StarSystem`/`StarPos`/`SystemAddress` augmentation at message level; instead explicitly pops them since they're not allowed by navroute/1 schema
+- **tests/test_constants.py**: Updated FSS_SIGNAL_DISALLOWED_FIELDS tests (timestamp no longer disallowed); will add Progress test
+- **tests/test_validator.py**: Updated FSSDiscoveryScan tests (SystemName preserved, Progress stripped, no StarSystem); updated NavRoute test (no message-level StarSystem/StarPos/SystemAddress)
+- **tests/test_signal_batcher.py**: Updated timestamp test (timestamp now preserved in signals)
+- 334 tests passing
+
+### Phase 8: Fix FSSSignalDiscovered Missing StarSystem/StarPos (2026-05-14)
+
+Root cause: FSSSignalDiscovered journal events in Elite Dangerous **never** contain 
+`StarSystem` or `StarPos` fields — they only have `SystemAddress`, `SignalName`, 
+and `SignalType`. The signal batcher stored `star_system=None` and `star_pos=None` 
+for these events, relying on the validator's `transform_fss_signal_discovered()` to 
+augment from `session_state`. However, there were two failure scenarios:
+
+1. **SystemAddress mismatch**: When an FSDJump triggers a batch flush, 
+   `parse_line()` updates `session_state` to the **current** system (the jump 
+   destination). But the accumulated signals are from the **previous** system. 
+   The SystemAddress mismatch blocked augmentation, resulting in 
+   `StarSystem: ""` and `StarPos: []` — which fails EDDN's fsssignaldiscovered/1 
+   schema validation that requires non-empty `StarSystem` and a 3-element 
+   `StarPos` array.
+
+2. **No prior position data**: If the watcher starts fresh (no prior FSDJump/Location 
+   event), `session_state` has no `star_pos`, and signals accumulated before any 
+   position event would have no position data to augment from.
+
+This caused EDDN 400 errors:
+- `'timestamp' is a required property` (empty `StarPos: []` may cause structural issues)
+- `'StarSystem' was unexpected` (signals sent to wrong schema due to cascading failures)
+- `'SystemAddress', 'StarSystem', 'StarPos' were unexpected` (position data in non-position schemas)
+
+### Changes applied:
+- **signal_batcher.py**: 
+  - `flush()` now takes optional `session_state` parameter
+  - When the batch lacks `star_system` or `star_pos`, it augments from `session_state` 
+    (checking SystemAddress match to prevent stale coordinates)
+  - When position data can't be obtained (mismatched SystemAddress with no signal-level 
+    data, or no session_state), the batch is **discarded** (returns None) — 
+    it's better to drop signals than submit invalid data to EDDN
+  - Added docstring explaining the position data flow
+- **watcher.py**: Updated `_process_reportable_event()` to pass `session_state` to 
+  `signal_batcher.flush()`
+- **validator.py**: Simplified `transform_fss_signal_discovered()` — since the batcher 
+  now handles augmentation and validation, the transform simply uses the batch's 
+  `star_system` and `star_pos` directly, falling back to `""` and `[]` only if the 
+  batch somehow has no data (which shouldn't happen since flush() returns None for 
+  empty batches)
+- **tests/test_signal_batcher.py**: Comprehensive rewrite to test:
+  - Augmentation from session_state when signals lack position data
+  - SystemAddress matching for safe augmentation
+  - Batch discarding when position data can't be determined
+  - Preservation of signal-level position data even with mismatched SystemAddress
+  - Batch discarding when no session_state and no signal position data
+- 343 tests passing, lint clean
+- **Sol FSDJump mystery resolved**: The `Sol` FSDJump events seen in EDDN are NOT from this plugin — they come from other EDDN contributors with different uploaderIDs. Zero FSDJump events to Sol exist in this device's journal files.
 
 ## Documentation Review (2026-05-10)
 - Reviewed README.md and AGENTS.md for accuracy against codebase

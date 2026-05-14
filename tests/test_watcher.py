@@ -107,7 +107,7 @@ class TestAuxiliaryFileHandling:
         assert message["$schemaRef"] == EDDN_COMMODITY_3_SCHEMA_REF
         assert message["message"]["stationName"] == "Jameson Memorial"
         assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
-        assert len(message["message"]["commodities"]) == 2
+        assert len(message["message"]["commodities"]) == 3
         # Verify Market is NOT sent as journal/1
         assert message["$schemaRef"] != EDDN_JOURNAL_1_SCHEMA_REF
 
@@ -154,7 +154,7 @@ class TestAuxiliaryFileHandling:
         message = watcher.submitter.submit.await_args.args[0]
         assert message["$schemaRef"] == EDDN_SHIPYARD_2_SCHEMA_REF
         # EDDN shipyard/2: ships is array of strings
-        assert message["message"]["ships"] == ["sidey", "eagle"]
+        assert message["message"]["ships"] == ["sidewinder", "eagle"]
 
     @pytest.mark.asyncio
     async def test_market_event_missing_market_json(self, watcher, tmp_path):
@@ -172,6 +172,74 @@ class TestAuxiliaryFileHandling:
 
         await watcher._process_file(str(journal_file))
 
+        watcher.submitter.submit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auxiliary_file_retries_on_missing(self, watcher, tmp_path, copy_fixture, monkeypatch):
+        """Outfitting event retries reading Outfitting.json when file not immediately available."""
+        call_count = 0
+        original_parse = watcher.parser.parse_auxiliary_file
+
+        def patched_parse(filepath):
+            nonlocal call_count
+            call_count += 1
+            # Fail first attempt, succeed on second
+            if call_count == 1:
+                return None
+            return original_parse(filepath)
+
+        copy_fixture("Outfitting.json")
+        watcher.parser.parse_auxiliary_file = patched_parse
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        # Speed up retries in test
+        import src.modules.watcher as watcher_mod
+        sleep_calls = []
+
+        async def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(watcher_mod.asyncio, "sleep", fake_sleep)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T13:05:00Z","event":"Outfitting","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Should have retried and succeeded on second attempt
+        assert call_count >= 2
+        watcher.submitter.submit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_auxiliary_file_retries_exhausted(self, watcher, tmp_path, monkeypatch):
+        """Outfitting event gives up after max retries when file never appears."""
+        watcher.parser.parse_auxiliary_file = lambda filepath: None  # Always return None
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        # Speed up retries in test
+        import src.modules.watcher as watcher_mod
+
+        async def fake_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(watcher_mod.asyncio, "sleep", fake_sleep)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T13:05:00Z","event":"Outfitting","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Should NOT submit anything when file never appears
         watcher.submitter.submit.assert_not_awaited()
 
     @pytest.mark.asyncio

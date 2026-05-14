@@ -203,11 +203,11 @@ class JournalWatcher:
 
         # 2. Check if this event should flush the signal batcher
         if self._signal_batcher.should_flush(event_type):
-            batch = self._signal_batcher.flush()
+            batch = self._signal_batcher.flush(session_state=self.parser.session_state)
             if batch:
                 message = self.validator.transform_fss_signal_discovered(batch, self.parser.session_state)
                 if message:
-                    await self.submitter.submit(message, event_name="FSSSignalDiscovered")
+                    await self._submit(message, event_name="FSSSignalDiscovered")
 
         # 3. Dedicated schema events (FSSDiscoveryScan, ApproachSettlement, CodexEntry)
         if event_type in DEDICATED_SCHEMA_EVENTS:
@@ -225,7 +225,7 @@ class JournalWatcher:
             decky.logger.debug(f"Event validation failed: {event_type}")
             return
         message = self.validator.transform(event, self.parser.session_state)
-        await self.submitter.submit(message)
+        await self._submit(message)
 
     async def _process_dedicated_schema_event(self, event: ParsedEvent) -> None:
         """Process events with dedicated EDDN schemas (not journal/1)."""
@@ -248,7 +248,7 @@ class JournalWatcher:
 
         message = transformer(event, self.parser.session_state)
         if message:
-            await self.submitter.submit(message, event_name=event_type)
+            await self._submit(message, event_name=event_type)
 
     async def _process_auxiliary_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
         """Process an event that requires an auxiliary JSON file."""
@@ -256,7 +256,7 @@ class JournalWatcher:
         auxiliary_filename = auxiliary_info["filename"]
         auxiliary_schema = auxiliary_info["schema"]
 
-        auxiliary_data = self._read_auxiliary_data(auxiliary_filename, source_filepath)
+        auxiliary_data = await self._read_auxiliary_data(auxiliary_filename, source_filepath)
         if auxiliary_data is None:
             decky.logger.debug(f"Auxiliary file missing/invalid for {event.event_type}: {auxiliary_filename}")
             return
@@ -267,7 +267,7 @@ class JournalWatcher:
             if message is None:
                 decky.logger.debug("NavRoute transform produced no data")
                 return
-            await self.submitter.submit(message, event_name=event.event_type)
+            await self._submit(message, event_name=event.event_type)
             return
 
         # Other auxiliary schemas: use dedicated transform methods
@@ -275,7 +275,16 @@ class JournalWatcher:
         if message is None:
             return
         event_name_override = event.event_type
-        await self.submitter.submit(message, event_name=event_name_override)
+        await self._submit(message, event_name=event_name_override)
+
+    async def _submit(self, message: dict, event_name: str | None = None) -> None:
+        """Submit an EDDN message with game version info from session state."""
+        await self.submitter.submit(
+            message,
+            event_name=event_name,
+            game_version=self.parser.session_state.game_version,
+            game_build=self.parser.session_state.game_build,
+        )
 
     def _prepare_auxiliary_submission(
         self,
@@ -316,12 +325,33 @@ class JournalWatcher:
             return None, None
         return None, message
 
-    def _read_auxiliary_data(self, auxiliary_filename: str, source_filepath: str | None) -> dict | None:
-        """Read an auxiliary JSON file from the journal directory."""
+    async def _read_auxiliary_data(self, auxiliary_filename: str, source_filepath: str | None) -> dict | None:
+        """Read an auxiliary JSON file from the journal directory.
+
+        Elite Dangerous writes auxiliary files (Market.json, Outfitting.json,
+        Shipyard.json, NavRoute.json) asynchronously after the corresponding
+        journal event line appears.  We retry a few times with short delays
+        so that we pick up the file once ED finishes writing it.
+        """
         auxiliary_path = self._resolve_auxiliary_path(auxiliary_filename, source_filepath)
         if auxiliary_path is None:
             return None
-        return self.parser.parse_auxiliary_file(str(auxiliary_path))
+
+        max_attempts = 5
+        delay = 0.5  # seconds between attempts
+        for attempt in range(max_attempts):
+            data = self.parser.parse_auxiliary_file(str(auxiliary_path))
+            if data is not None:
+                return data
+            if attempt < max_attempts - 1:
+                decky.logger.debug(
+                    f"Auxiliary file {auxiliary_filename} not available yet, "
+                    f"retry {attempt + 1}/{max_attempts}"
+                )
+                await asyncio.sleep(delay)
+
+        decky.logger.info(f"Auxiliary file {auxiliary_filename} still missing after {max_attempts} attempts")
+        return None
 
     def _resolve_auxiliary_path(self, auxiliary_filename: str, source_filepath: str | None) -> Path | None:
         """Resolve an auxiliary filename to a full path in the journal directory."""

@@ -839,7 +839,10 @@ class TestTransformFSSSignalDiscovered:
         assert signal["OpposingPower"] == "Zachary Hudson"
 
     def test_augments_star_pos_from_session_state(self, validator):
-        batch = self._make_batch(star_pos=None)
+        """When batch has star_pos=None, the transform uses whatever the batch provides."""
+        # Note: As of the batcher refactor, the batcher handles augmentation.
+        # The transform now simply uses the values from the batch.
+        batch = self._make_batch(star_pos=[1.0, 2.0, 3.0])
         session_state = SessionState(
             star_pos=[1.0, 2.0, 3.0],
             system_address=10477373803,
@@ -888,7 +891,7 @@ class TestTransformFSSDiscoveryScan:
             raw={
                 "timestamp": "2026-01-12T12:15:00Z",
                 "event": "FSSDiscoveryScan",
-                "StarSystem": "Sol",
+                "SystemName": "Sol",
                 "SystemAddress": 10477373803,
                 "StarPos": [0.0, 0.0, 0.0],
                 "BodyCount": 21,
@@ -905,12 +908,13 @@ class TestTransformFSSDiscoveryScan:
         assert message["$schemaRef"] == EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF
         payload = message["message"]
         assert payload["timestamp"] == "2026-01-12T12:15:00Z"
-        assert payload["StarSystem"] == "Sol"
+        assert payload["SystemName"] == "Sol"
+        assert "StarSystem" not in payload
         assert payload["SystemAddress"] == 10477373803
         assert payload["StarPos"] == [0.0, 0.0, 0.0]
         assert payload["BodyCount"] == 21
         assert payload["NonBodyCount"] == 42
-        assert payload["Progress"] == 0.95
+        assert "Progress" not in payload
         assert payload["horizons"] is True
         assert payload["odyssey"] is True
 
@@ -919,7 +923,7 @@ class TestTransformFSSDiscoveryScan:
             raw={
                 "timestamp": "2026-01-12T12:15:00Z",
                 "event": "FSSDiscoveryScan",
-                "StarSystem": "Sol",
+                "SystemName": "Sol",
                 "SystemAddress": 10477373803,
                 "BodyCount": 1,
                 "NonBodyCount": 0,
@@ -940,7 +944,7 @@ class TestTransformFSSDiscoveryScan:
             raw={
                 "timestamp": "2026-01-12T12:15:00Z",
                 "event": "FSSDiscoveryScan",
-                "StarSystem": "Sol",
+                "SystemName": "Sol",
                 "SystemAddress": 10477373803,
                 "BodyCount": 21,
                 "NonBodyCount": 42,
@@ -957,17 +961,62 @@ class TestTransformFSSDiscoveryScan:
 
         assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
 
-    def test_strips_disallowed_fields(self, validator):
+    def test_augments_system_name_from_session_state(self, validator):
+        """If event lacks SystemName, it should be augmented from session_state."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T12:15:00Z",
                 "event": "FSSDiscoveryScan",
-                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert message["message"]["SystemName"] == "Sol"
+        assert "StarSystem" not in message["message"]
+
+    def test_does_not_inject_star_system(self, validator):
+        """fssdiscoveryscan/1 uses SystemName, not StarSystem."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "BodyCount": 21,
+                "NonBodyCount": 42,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(
+            star_system="Sol",
+        )
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert "StarSystem" not in message["message"]
+        assert message["message"]["SystemName"] == "Sol"
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "SystemName": "Sol",
                 "SystemAddress": 10477373803,
                 "StarPos": [0.0, 0.0, 0.0],
                 "BodyCount": 21,
                 "NonBodyCount": 42,
                 "ActiveFine": True,
+                "Progress": 0.95,
             },
             event_type="FSSDiscoveryScan",
             timestamp="2026-01-12T12:15:00Z",
@@ -976,9 +1025,10 @@ class TestTransformFSSDiscoveryScan:
         message = validator.transform_fss_discovery_scan(event, session_state)
 
         assert "ActiveFine" not in message["message"]
+        assert "Progress" not in message["message"]
 
-    def test_renames_system_name_to_star_system(self, validator):
-        """ED journal uses SystemName, but EDDN fssdiscoveryscan/1 requires StarSystem."""
+    def test_preserves_system_name(self, validator):
+        """EDDN fssdiscoveryscan/1 schema uses SystemName (same as journal), not StarSystem."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T12:15:00Z",
@@ -997,32 +1047,8 @@ class TestTransformFSSDiscoveryScan:
 
         assert message is not None
         payload = message["message"]
-        assert "SystemName" not in payload
-        assert payload["StarSystem"] == "Sol"
-
-    def test_drops_system_name_when_star_system_present(self, validator):
-        """If both SystemName and StarSystem exist, keep StarSystem and drop SystemName."""
-        event = ParsedEvent(
-            raw={
-                "timestamp": "2026-01-12T12:15:00Z",
-                "event": "FSSDiscoveryScan",
-                "SystemName": "Sol",
-                "StarSystem": "Sol",
-                "SystemAddress": 10477373803,
-                "BodyCount": 21,
-                "NonBodyCount": 42,
-                "StarPos": [0.0, 0.0, 0.0],
-            },
-            event_type="FSSDiscoveryScan",
-            timestamp="2026-01-12T12:15:00Z",
-        )
-        session_state = SessionState(horizons=True, odyssey=True)
-        message = validator.transform_fss_discovery_scan(event, session_state)
-
-        assert message is not None
-        payload = message["message"]
-        assert "SystemName" not in payload
-        assert payload["StarSystem"] == "Sol"
+        assert payload["SystemName"] == "Sol"
+        assert "StarSystem" not in payload
 
 
 class TestTransformNavRoute:
@@ -1054,9 +1080,11 @@ class TestTransformNavRoute:
         message = validator.transform_navroute(navroute_data, session_state)
         assert message["$schemaRef"] == EDDN_NAVROUTE_1_SCHEMA_REF
 
-    def test_augments_star_pos_at_message_level(self, validator, load_fixture):
-        """NavRoute/1 requires StarSystem/StarPos/SystemAddress at message level."""
+    def test_no_message_level_star_system_star_pos_system_address(self, validator, load_fixture):
+        """NavRoute/1 schema only allows timestamp, event, Route, horizons, odyssey at message level.
+        StarSystem/StarPos/SystemAddress must only be in Route entries, not at message level."""
         navroute_data = load_fixture("NavRoute.json")
+        # Even if session_state has these, they should NOT be augmented at message level
         session_state = SessionState(
             star_pos=[0.0, 0.0, 0.0],
             system_address=10477373803,
@@ -1065,9 +1093,13 @@ class TestTransformNavRoute:
         message = validator.transform_navroute(navroute_data, session_state)
 
         payload = message["message"]
-        assert "StarSystem" in payload
-        assert "StarPos" in payload
-        assert "SystemAddress" in payload
+        assert "StarSystem" not in payload
+        assert "StarPos" not in payload
+        assert "SystemAddress" not in payload
+        # But Route entries should still have them
+        assert payload["Route"][0]["StarSystem"] == "Sol"
+        assert payload["Route"][0]["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["Route"][0]["SystemAddress"] == 10477373803
 
     def test_strips_localised_from_route_entries(self, validator):
         """_Localised keys in Route entries should be stripped."""
@@ -1090,6 +1122,18 @@ class TestTransformNavRoute:
         route_entry = message["message"]["Route"][0]
         assert "StarSystem_Localised" not in route_entry
         assert "StarSystem" in route_entry
+
+    def test_navroute_clear_returns_none(self, validator):
+        """NavRouteClear should be skipped — it's not a valid NavRoute submission."""
+        navroute_clear_data = {
+            "timestamp": "2026-01-12T14:00:00Z",
+            "event": "NavRouteClear",
+            "Route": [],
+        }
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_navroute(navroute_clear_data, session_state)
+
+        assert message is None
 
 
 class TestTransformApproachSettlement:
@@ -1502,7 +1546,7 @@ class TestTransformCommodity:
         assert payload["marketId"] == 128666762
         assert payload["horizons"] is True
         assert payload["odyssey"] is False
-        assert len(payload["commodities"]) == 2
+        assert len(payload["commodities"]) == 3
         assert payload["commodities"][0] == {
             "name": "hydrogenfuel",
             "meanPrice": 87,
@@ -1522,6 +1566,17 @@ class TestTransformCommodity:
             "sellPrice": 95,
             "demand": 0,
             "demandBracket": 0,
+        }
+        assert payload["commodities"][2] == {
+            "name": "gold",
+            "meanPrice": 47113,
+            "buyPrice": 0,
+            "stock": 0,
+            "stockBracket": 0,
+            "sellPrice": 48632,
+            "demand": 166200,
+            "demandBracket": 3,
+            "statusFlags": ["powerplay"],
         }
 
     def test_transform_commodity_empty_returns_none(self, validator):
@@ -1574,6 +1629,25 @@ class TestTransformCommodity:
         }
         assert validator.transform_commodity(market_data, SessionState()) is None
 
+    def test_commodity_name_sanitization(self, validator):
+        """Commodity names with $..._name; format should be sanitized."""
+        from src.modules.validator import _sanitize_eddn_name
+
+        # Commodity names: strip $..._name; format
+        assert _sanitize_eddn_name("$platinum_name;") == "platinum"
+        assert _sanitize_eddn_name("$lowtemperaturediamond_name;") == "lowtemperaturediamond"
+        assert _sanitize_eddn_name("$fruitandvegetables_name;") == "fruitandvegetables"
+        assert _sanitize_eddn_name("$metaalloys_name;") == "metaalloys"
+        # Ship types: strip $..._name; format
+        assert _sanitize_eddn_name("$SideWinder_name;") == "SideWinder"
+        assert _sanitize_eddn_name("$eagle_name;") == "eagle"
+        # Already-clean names pass through unchanged
+        assert _sanitize_eddn_name("hydrogenfuel") == "hydrogenfuel"
+        assert _sanitize_eddn_name("drones") == "drones"
+        assert _sanitize_eddn_name("int_cargo_rack_size6_class1") == "int_cargo_rack_size6_class1"
+        # Names with $ prefix but only trailing ; (e.g. rare format)
+        assert _sanitize_eddn_name("$something;") == "something"
+
 
 class TestTransformOutfitting:
     def test_transform_outfitting_data(self, validator, load_fixture):
@@ -1602,7 +1676,7 @@ class TestTransformOutfitting:
             "StarSystem": "Sol",
             "StationName": "Test",
             "MarketID": 123,
-            "Modules": [],
+            "Items": [],
         }
         assert validator.transform_outfitting(outfitting_data, SessionState()) is None
 
@@ -1611,7 +1685,7 @@ class TestTransformOutfitting:
             "timestamp": "2026-01-12T13:05:00Z",
             "StationName": "Test",
             "MarketID": 123,
-            "Modules": [{"Name": "test_module"}],
+            "Items": [{"Name": "test_module"}],
         }
         assert validator.transform_outfitting(outfitting_data, SessionState()) is None
 
@@ -1621,7 +1695,7 @@ class TestTransformOutfitting:
             "StarSystem": "Sol",
             "StationName": "Test",
             "MarketID": 0,
-            "Modules": [{"Name": "test_module"}],
+            "Items": [{"Name": "test_module"}],
         }
         assert validator.transform_outfitting(outfitting_data, SessionState()) is None
 
@@ -1639,7 +1713,7 @@ class TestTransformShipyard:
         assert payload["systemName"] == "Shinrarta Dezhra"
         assert payload["stationName"] == "Jameson Memorial"
         assert payload["marketId"] == 128666762
-        assert payload["ships"] == ["sidey", "eagle"]
+        assert payload["ships"] == ["sidewinder", "eagle"]
         assert payload["horizons"] is True
         assert payload["odyssey"] is True
 

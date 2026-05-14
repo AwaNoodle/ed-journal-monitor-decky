@@ -67,6 +67,28 @@ def _strip_disallowed(obj: object, keep_fields: set[str] | None = None) -> objec
     return obj
 
 
+def _sanitize_eddn_name(name: str) -> str:
+    """Sanitize an EDDN name from journal data.
+
+    The journal uses internal symbolic names like '$platinum_name;'
+    or '$SideWinder_name;' while EDDN expects the clean form
+    'platinum' or 'SideWinder'.  This function strips the leading
+    '$' and trailing '_name;' (or just ';' if no '_name' suffix
+    is present).
+
+    Applies to commodity names from Market.json, ShipType from
+    Shipyard.json, and module names from Outfitting.json.
+    Names that are already in the clean format pass through unchanged.
+    """
+    if name.startswith('$'):
+        name = name[1:]
+    if name.endswith('_name;'):
+        name = name[:-6]
+    elif name.endswith(';'):
+        name = name[:-1]
+    return name
+
+
 def _as_dict_list(value: object) -> list[dict]:
     """Normalize a JSON value into a list of dictionaries."""
     if not isinstance(value, list):
@@ -186,24 +208,18 @@ class EDDNValidator:
             cleaned = {k: v for k, v in signal.items() if not k.endswith("_Localised")}
             cleaned_signals.append(cleaned)
 
-        # Build message-level fields
-        star_system = batch.get("star_system")
-        star_pos = batch.get("star_pos")
+        # Position data comes from the batch (augmented by SignalBatcher.flush()
+        # using session_state). The batcher already verified SystemAddress matches
+        # and discarded batches without valid position data.
+        star_system = batch.get("star_system", "")
+        star_pos = batch.get("star_pos", [])
         system_address = batch.get("system_address")
-
-        # Augment from session_state if needed
-        if not star_pos and session_state.star_pos:  # noqa: SIM102
-            if system_address is None or system_address == session_state.system_address:
-                star_pos = session_state.star_pos
-        if not star_system and session_state.star_system:  # noqa: SIM102
-            if system_address is None or system_address == session_state.system_address:
-                star_system = session_state.star_system
 
         payload: dict = {
             "timestamp": batch.get("last_timestamp", ""),
             "event": "FSSSignalDiscovered",
-            "StarSystem": star_system or "",
-            "StarPos": star_pos or [],
+            "StarSystem": star_system,
+            "StarPos": star_pos,
             "SystemAddress": system_address,
             "signals": cleaned_signals,
             "horizons": session_state.horizons,
@@ -230,21 +246,19 @@ class EDDNValidator:
         for field in JOURNAL_1_ONLY_DISALLOWED:
             message_payload.pop(field, None)
 
-        # Rename SystemName → StarSystem (journal uses SystemName, EDDN uses StarSystem)
-        if "SystemName" in message_payload and "StarSystem" not in message_payload:
-            message_payload["StarSystem"] = message_payload.pop("SystemName")
-        elif "SystemName" in message_payload:
-            message_payload.pop("SystemName")
+        # fssdiscoveryscan/1 uses SystemName (same as journal), not StarSystem
+        # No rename needed - SystemName is the correct field name for this schema.
 
-        # Augment StarPos/StarSystem from session_state if missing
+        # Augment StarPos from session_state if missing
         if "StarPos" not in message_payload and session_state.star_pos:
             event_sys = message_payload.get("SystemAddress")
             if event_sys is None or event_sys == session_state.system_address:
                 message_payload["StarPos"] = session_state.star_pos
-        if "StarSystem" not in message_payload and session_state.star_system:
+        # Augment SystemName from session_state if missing
+        if "SystemName" not in message_payload and session_state.star_system:
             event_sys = message_payload.get("SystemAddress")
             if event_sys is None or event_sys == session_state.system_address:
-                message_payload["StarSystem"] = session_state.star_system
+                message_payload["SystemName"] = session_state.star_system
 
         # Add horizons/odyssey
         message_payload["horizons"] = session_state.horizons
@@ -259,10 +273,18 @@ class EDDNValidator:
     def transform_navroute(self, auxiliary_data: dict, session_state: SessionState) -> dict | None:
         """Transform NavRoute.json data into navroute/1 EDDN schema.
 
-        Builds message with timestamp, event, Route, StarSystem, StarPos,
-        SystemAddress at message level (augmented from session_state if needed).
-        Route entries have _Localised keys stripped.
+        The navroute/1 schema only allows timestamp, event, Route,
+        horizons, and odyssey at message level. StarSystem, StarPos, and
+        SystemAddress belong only inside Route[] entries (where the journal
+        already provides them). Route entries have _Localised keys stripped.
+
+        Returns None if the auxiliary data is NavRouteClear (empty route)
+        or has an unexpected event type.
         """
+        # NavRouteClear is not a valid NavRoute submission — skip it
+        if auxiliary_data.get("event") == "NavRouteClear":
+            return None
+
         # Strip disallowed and _Localised from the top-level payload
         message_payload = _strip_disallowed(auxiliary_data)
 
@@ -282,17 +304,12 @@ class EDDNValidator:
                     cleaned_route.append(entry)
             message_payload["Route"] = cleaned_route
 
-        # Augment StarSystem/StarPos/SystemAddress at message level from session_state
-        if "StarSystem" not in message_payload and session_state.star_system:
-            event_sys = message_payload.get("SystemAddress")
-            if event_sys is None or event_sys == session_state.system_address:
-                message_payload["StarSystem"] = session_state.star_system
-        if "StarPos" not in message_payload and session_state.star_pos:
-            event_sys = message_payload.get("SystemAddress")
-            if event_sys is None or event_sys == session_state.system_address:
-                message_payload["StarPos"] = session_state.star_pos
-        if "SystemAddress" not in message_payload and session_state.system_address is not None:
-            message_payload["SystemAddress"] = session_state.system_address
+        # Remove message-level StarSystem/StarPos/SystemAddress if present.
+        # The navroute/1 schema does not allow these at message level;
+        # they belong inside individual Route entries only.
+        message_payload.pop("StarSystem", None)
+        message_payload.pop("StarPos", None)
+        message_payload.pop("SystemAddress", None)
 
         # Add horizons/odyssey
         message_payload["horizons"] = session_state.horizons
@@ -408,8 +425,8 @@ class EDDNValidator:
             if stock_bracket == 0 and demand_bracket == 0:
                 continue
 
-            commodities.append({
-                "name": name,
+            commodity = {
+                "name": _sanitize_eddn_name(name),
                 "meanPrice": item.get("MeanPrice", 0),
                 "buyPrice": item.get("BuyPrice", 0),
                 "stock": item.get("Stock", 0),
@@ -417,7 +434,14 @@ class EDDNValidator:
                 "sellPrice": item.get("SellPrice", 0),
                 "demand": item.get("Demand", 0),
                 "demandBracket": demand_bracket,
-            })
+            }
+
+            # Include statusFlags if present (e.g. ["powerplay"])
+            status_flags = item.get("StatusFlags")
+            if status_flags and isinstance(status_flags, list):
+                commodity["statusFlags"] = status_flags
+
+            commodities.append(commodity)
 
         if not commodities:
             return None
@@ -450,11 +474,11 @@ class EDDNValidator:
             return None
 
         modules = []
-        for module in _as_dict_list(outfitting_data.get("Modules", [])):
+        for module in _as_dict_list(outfitting_data.get("Items", [])):
             name = module.get("Name")
             if not name or not isinstance(name, str):
                 continue
-            modules.append(name)
+            modules.append(_sanitize_eddn_name(name))
 
         if not modules:
             return None
@@ -491,7 +515,7 @@ class EDDNValidator:
             ship_type = ship.get("ShipType")
             if not ship_type or not isinstance(ship_type, str):
                 continue
-            ships.append(ship_type)
+            ships.append(_sanitize_eddn_name(ship_type))
 
         if not ships:
             return None
