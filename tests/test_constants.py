@@ -157,11 +157,12 @@ class TestFssSignalDisallowedFields:
     def test_event_in_disallowed(self):
         assert "event" in FSS_SIGNAL_DISALLOWED_FIELDS
 
-    def test_timestamp_in_disallowed(self):
-        assert "timestamp" in FSS_SIGNAL_DISALLOWED_FIELDS
+    def test_timestamp_not_in_disallowed(self):
+        """Timestamp must be preserved in signals for fsssignaldiscovered/1 schema."""
+        assert "timestamp" not in FSS_SIGNAL_DISALLOWED_FIELDS
 
     def test_complete_set(self):
-        assert {"TimeRemaining", "event", "timestamp"} == FSS_SIGNAL_DISALLOWED_FIELDS
+        assert {"TimeRemaining", "event"} == FSS_SIGNAL_DISALLOWED_FIELDS
 
 
 class TestDedicatedSchemaEvents:

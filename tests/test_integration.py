@@ -47,7 +47,7 @@ class TestEndToEndPipeline:
         # Patch submitter to not actually POST
         submitted_messages = []
 
-        async def mock_submit(message, event_name=None):
+        async def mock_submit(message, event_name=None, game_version="", game_build=""):
             submitted_messages.append(message)
             return True
 
@@ -105,7 +105,7 @@ class TestEndToEndPipeline:
         assert message["$schemaRef"] == EDDN_COMMODITY_3_SCHEMA_REF
         assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
         assert message["message"]["stationName"] == "Jameson Memorial"
-        assert len(message["message"]["commodities"]) == 2
+        assert len(message["message"]["commodities"]) == 3
 
     @pytest.mark.asyncio
     async def test_outfitting_auxiliary_pipeline(self, tmp_path, copy_fixture):
@@ -164,7 +164,7 @@ class TestEndToEndPipeline:
         assert message["$schemaRef"] == EDDN_SHIPYARD_2_SCHEMA_REF
         assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
         # EDDN shipyard/2: ships is array of strings
-        assert message["message"]["ships"] == ["sidey", "eagle"]
+        assert message["message"]["ships"] == ["sidewinder", "eagle"]
 
     @pytest.mark.asyncio
     async def test_navroute_auxiliary_pipeline(self, tmp_path, copy_fixture):
@@ -210,7 +210,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message, event_name=None):
+        async def mock_submit(message, event_name=None, game_version="", game_build=""):
             submitted_messages.append(message)
             return True
 
@@ -254,7 +254,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message, event_name=None):
+        async def mock_submit(message, event_name=None, game_version="", game_build=""):
             submitted_messages.append(message)
             return True
 
@@ -292,7 +292,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message, event_name=None):
+        async def mock_submit(message, event_name=None, game_version="", game_build=""):
             submitted_messages.append(message)
             return True
 
@@ -333,7 +333,7 @@ class TestEndToEndPipeline:
 
         submitted_messages = []
 
-        async def mock_submit(message, event_name=None):
+        async def mock_submit(message, event_name=None, game_version="", game_build=""):
             submitted_messages.append(message)
             return True
 

@@ -178,7 +178,7 @@ class TestParseAuxiliaryFile:
 
         assert data is not None
         assert data["event"] == "Outfitting"
-        assert len(data["Modules"]) == 2
+        assert len(data["Items"]) == 2
 
     def test_parse_shipyard_file(self, parser):
         fixture = Path(__file__).parent / "fixtures" / "Shipyard.json"

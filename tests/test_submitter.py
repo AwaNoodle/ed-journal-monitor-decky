@@ -43,6 +43,52 @@ class TestMessageConstruction:
         assert "gatewayTimestamp" in message["header"]
 
     @pytest.mark.asyncio
+    async def test_submit_includes_game_version_in_header(self, submitter):
+        message = {
+            "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
+            "header": {},
+            "message": {"event": "FSDJump", "StarSystem": "Sol"},
+        }
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            result = await submitter.submit(
+                message,
+                game_version="4.1.0.404",
+                game_build="r280105/r0 ",
+            )
+
+        assert result is True
+        assert message["header"]["gameversion"] == "4.1.0.404"
+        assert message["header"]["gamebuild"] == "r280105/r0 "
+
+    @pytest.mark.asyncio
+    async def test_submit_omits_game_version_when_empty(self, submitter):
+        message = {
+            "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
+            "header": {},
+            "message": {"event": "FSDJump", "StarSystem": "Sol"},
+        }
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            result = await submitter.submit(message)
+
+        assert result is True
+        assert "gameversion" not in message["header"]
+        assert "gamebuild" not in message["header"]
+
+    @pytest.mark.asyncio
     async def test_submit_sends_correct_url(self, submitter):
         message = {
             "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",

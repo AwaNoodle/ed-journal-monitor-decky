@@ -33,9 +33,9 @@ HTTP_SERVER_ERROR_MIN = 500
 
 # Known system CA bundle paths (Steam Deck / Arch Linux)
 _SYSTEM_CA_PATHS = [
-    "/etc/ssl/cert.pem",          # Arch/SteamOS (ca-certificates)
+    "/etc/ssl/cert.pem",  # Arch/SteamOS (ca-certificates)
     "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
-    "/etc/pki/tls/certs/ca-bundle.crt",   # RHEL/Fedora
+    "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/Fedora
 ]
 
 
@@ -64,6 +64,7 @@ def _build_ssl_context() -> ssl.SSLContext:
     # 2. Try certifi (bundled with Decky Loader's PyInstaller package)
     try:
         import certifi  # type: ignore[import-untyped]  # noqa: PLC0415
+
         certifi_path = certifi.where()
         if Path(certifi_path).is_file():
             ctx = ssl.create_default_context(cafile=certifi_path)
@@ -98,7 +99,9 @@ class EDDNSubmitter:
         self._last_error_message: str | None = None
         self._last_http_status: int | None = None
 
-    async def submit(self, message: dict, event_name: str | None = None) -> bool:
+    async def submit(
+        self, message: dict, event_name: str | None = None, game_version: str = "", game_build: str = ""
+    ) -> bool:
         """
         Submit an EDDN message. Populates header with settings, then POSTs.
         Returns True on success, False on failure.
@@ -109,14 +112,21 @@ class EDDNSubmitter:
                 If not provided, extracted from message["message"]["event"].
                 Needed for auxiliary schemas (commodity/outfitting/shipyard)
                 which don't have an "event" field in the message payload.
+            game_version: Game version string from Fileheader event (e.g. "4.1.0.404").
+            game_build: Game build string from Fileheader event (e.g. "r280105/r0 ").
         """
         # Populate header
-        message["header"] = {
+        header = {
             "uploaderID": self.settings.get("uploader_id", ""),
             "softwareName": "ED Journal Monitor Decky",
             "softwareVersion": self.settings.get("software_version", "0.1.0"),
             "gatewayTimestamp": datetime.now(timezone.utc).isoformat(),
         }
+        if game_version:
+            header["gameversion"] = game_version
+        if game_build:
+            header["gamebuild"] = game_build
+        message["header"] = header
 
         self._last_error_message = None
         self._last_http_status = None
@@ -134,11 +144,14 @@ class EDDNSubmitter:
                 except Exception as e:
                     decky.logger.error(f"Activity log record error: {e}")
             try:
-                await decky.emit("upload_success", {
-                    "event": resolved_name,
-                    "event_name": resolved_name,
-                    "total_success": self._success_count,
-                })
+                await decky.emit(
+                    "upload_success",
+                    {
+                        "event": resolved_name,
+                        "event_name": resolved_name,
+                        "total_success": self._success_count,
+                    },
+                )
             except Exception as e:
                 decky.logger.error(f"decky emit upload_success error: {e}")
         else:
@@ -152,10 +165,13 @@ class EDDNSubmitter:
                 except Exception as e:
                     decky.logger.error(f"Activity log record error: {e}")
             try:
-                await decky.emit("upload_failed", {
-                    "event": resolved_name,
-                    "total_failed": self._fail_count,
-                })
+                await decky.emit(
+                    "upload_failed",
+                    {
+                        "event": resolved_name,
+                        "total_failed": self._fail_count,
+                    },
+                )
             except Exception as e:
                 decky.logger.error(f"decky emit upload_failed error: {e}")
 
@@ -241,7 +257,7 @@ class EDDNSubmitter:
 
     def _calculate_retry_delay(self, attempt: int) -> float:
         """Calculate exponential backoff delay with jitter."""
-        delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+        delay = INITIAL_RETRY_DELAY * (2**attempt)
         jitter = random.uniform(0, 1)
         return min(delay + jitter, 60.0)
 

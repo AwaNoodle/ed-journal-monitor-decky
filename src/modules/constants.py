@@ -69,6 +69,7 @@ EDDN_DISALLOWED_FIELDS = {
     "FuelLevel",
     "FuelUsed",
     "JumpDist",
+    "Progress",
     "Wanted",
 }
 
@@ -85,4 +86,4 @@ EDDN_FACTIONS_DISALLOWED_FIELDS = {
 }
 
 # Fields stripped from individual FSSSignalDiscovered signals before batching
-FSS_SIGNAL_DISALLOWED_FIELDS = {"TimeRemaining", "event", "timestamp"}
+FSS_SIGNAL_DISALLOWED_FIELDS = {"TimeRemaining", "event"}

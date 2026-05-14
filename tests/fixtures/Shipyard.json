@@ -7,13 +7,13 @@
   "PriceList": [
     {
       "id": 1,
-      "ShipType": "sidey",
+      "ShipType": "$sidewinder_name;",
       "ShipType_Localised": "Sidewinder",
       "ShipPrice": 31000
     },
     {
       "id": 2,
-      "ShipType": "eagle",
+      "ShipType": "$eagle_name;",
       "ShipType_Localised": "Eagle",
       "ShipPrice": 44000
     }

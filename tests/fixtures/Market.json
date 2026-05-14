@@ -7,9 +7,9 @@
   "Items": [
     {
       "id": 1,
-      "Name": "agririmethe",
+      "Name": "$agronomictreatment_name;",
       "Name_Localised": "Agronomic Treatment",
-      "Category": "Non-marketable",
+      "Category": "$u16_nondeMarketable_name;",
       "Category_Localised": "Non-marketable",
       "BuyPrice": 0,
       "SellPrice": 0,
@@ -21,9 +21,10 @@
     },
     {
       "id": 2,
-      "Name": "hydrogenfuel",
+      "Name": "$hydrogenfuel_name;",
       "Name_Localised": "Hydrogen Fuel",
-      "Category": "Chemicals",
+      "Category": "$u17_chemicals_name;",
+      "Category_Localised": "Chemicals",
       "BuyPrice": 90,
       "SellPrice": 85,
       "MeanPrice": 87,
@@ -34,9 +35,10 @@
     },
     {
       "id": 3,
-      "Name": "drones",
+      "Name": "$drones_name;",
       "Name_Localised": "Limpet",
-      "Category": "Non-marketable",
+      "Category": "$u16_nondeMarketable_name;",
+      "Category_Localised": "Non-marketable",
       "BuyPrice": 101,
       "SellPrice": 95,
       "MeanPrice": 99,
@@ -44,6 +46,21 @@
       "Demand": 0,
       "StockBracket": 3,
       "DemandBracket": 0
+    },
+    {
+      "id": 4,
+      "Name": "$gold_name;",
+      "Name_Localised": "Gold",
+      "Category": "$u17_minerals_name;",
+      "Category_Localised": "Minerals",
+      "BuyPrice": 0,
+      "SellPrice": 48632,
+      "MeanPrice": 47113,
+      "Stock": 0,
+      "Demand": 166200,
+      "StockBracket": 0,
+      "DemandBracket": 3,
+      "StatusFlags": ["powerplay"]
     }
   ]
 }
