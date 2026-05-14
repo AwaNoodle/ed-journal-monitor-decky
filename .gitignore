@@ -64,3 +64,4 @@ cli/decky
 
 # Python virtual environment
 .venv/
+example-events/
