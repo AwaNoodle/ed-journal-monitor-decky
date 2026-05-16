@@ -26,7 +26,7 @@ graph LR
   end
 
   subgraph Backend["Backend (Python)"]
-    E[File watcher\n(polling)]
+    E["File watcher (polling)"]
     F[Journal parser]
     G[EDDN validator]
     H[EDDN submitter]
@@ -37,8 +37,8 @@ graph LR
     M[Constants]
   end
 
-  Frontend -->|callable\(\)| Backend
-  Backend -->|decky.emit\(\)| Frontend
+  Frontend -->|"callable()"| Backend
+  Backend -->|"decky.emit()"| Frontend
 ```
 
 **Frontend→Backend** communication uses Decky `callable()` (see [src/api.ts](src/api.ts)).
