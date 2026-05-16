@@ -8,9 +8,11 @@ from src.modules.constants import (
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
     EDDN_DISALLOWED_FIELDS,
+    EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
+    EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
@@ -65,6 +67,12 @@ class TestReportableEvents:
     def test_includes_codex_entry(self):
         assert "CodexEntry" in REPORTABLE_EVENTS
 
+    def test_includes_navbeaconscan(self):
+        assert "NavBeaconScan" in REPORTABLE_EVENTS
+
+    def test_includes_fcmaterials(self):
+        assert "FCMaterials" in REPORTABLE_EVENTS
+
 
 class TestAuxiliaryFiles:
     def test_auxiliary_file_mapping(self):
@@ -73,13 +81,16 @@ class TestAuxiliaryFiles:
             "Outfitting": {"filename": "Outfitting.json", "schema": "outfitting"},
             "Shipyard": {"filename": "Shipyard.json", "schema": "shipyard"},
             "NavRoute": {"filename": "NavRoute.json", "schema": "navroute"},
-    }
+            "FCMaterials": {"filename": "FCMaterials.json", "schema": "fcmaterials"},
+        }
 
     def test_auxiliary_schema_events_derived(self):
         """AUXILIARY_SCHEMA_EVENTS is derived from AUXILIARY_FILES (non-journal schemas)."""
-        assert {"Market", "Outfitting", "Shipyard", "NavRoute"} == AUXILIARY_SCHEMA_EVENTS
+        assert {"Market", "Outfitting", "Shipyard", "NavRoute", "FCMaterials"} == AUXILIARY_SCHEMA_EVENTS
         # NavRoute is now navroute schema, not journal
         assert "NavRoute" in AUXILIARY_SCHEMA_EVENTS
+        # FCMaterials uses fcmaterials_journal/1 schema
+        assert "FCMaterials" in AUXILIARY_SCHEMA_EVENTS
 
 
 class TestSchemaReferences:
@@ -109,6 +120,12 @@ class TestSchemaReferences:
 
     def test_codexentry1_schema_ref(self):
         assert EDDN_CODEXENTRY_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/codexentry/1"
+
+    def test_navbeaconscan1_schema_ref(self):
+        assert EDDN_NAVBEACONSCAN_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/navbeaconscan/1"
+
+    def test_fcmaterials_journal1_schema_ref(self):
+        assert EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/fcmaterials_journal/1"
 
 
 class TestDisallowedFields:
@@ -175,6 +192,9 @@ class TestDedicatedSchemaEvents:
     def test_codex_entry_in_dedicated(self):
         assert "CodexEntry" in DEDICATED_SCHEMA_EVENTS
 
+    def test_navbeaconscan_in_dedicated(self):
+        assert "NavBeaconScan" in DEDICATED_SCHEMA_EVENTS
+
     def test_fss_signal_discovered_schema(self):
         entry = DEDICATED_SCHEMA_EVENTS["FSSSignalDiscovered"]
         assert entry["schema"] == "fsssignaldiscovered"
@@ -195,5 +215,10 @@ class TestDedicatedSchemaEvents:
         assert entry["schema"] == "codexentry"
         assert entry["schema_ref"] == EDDN_CODEXENTRY_1_SCHEMA_REF
 
-    def test_only_four_dedicated_events(self):
-        assert len(DEDICATED_SCHEMA_EVENTS) == 4
+    def test_navbeaconscan_schema(self):
+        entry = DEDICATED_SCHEMA_EVENTS["NavBeaconScan"]
+        assert entry["schema"] == "navbeaconscan"
+        assert entry["schema_ref"] == EDDN_NAVBEACONSCAN_1_SCHEMA_REF
+
+    def test_only_five_dedicated_events(self):
+        assert len(DEDICATED_SCHEMA_EVENTS) == 5

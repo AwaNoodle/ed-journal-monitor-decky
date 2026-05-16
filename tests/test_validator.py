@@ -6,8 +6,10 @@ from src.modules.constants import (
     EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
+    EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
@@ -363,6 +365,68 @@ class TestValidateNewJournalEvents:
             star_system="Sol",
         )
         assert validator.validate(event, session_state) is True
+
+    def test_valid_navbeaconscan_with_session_state(self, validator):
+        """NavBeaconScan requires timestamp and NumBodies; StarPos augmented from session_state."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is True
+
+    def test_navbeaconscan_rejected_without_num_bodies(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        assert validator.validate(event) is False
+
+    def test_navbeaconscan_rejected_without_session_state(self, validator):
+        """NavBeaconScan needs StarPos augmentation from session_state."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        assert validator.validate(event) is False
+
+    def test_navbeaconscan_rejected_wrong_system(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 99999,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is False
 
     @pytest.mark.parametrize(
         ("event_type", "raw"),
@@ -1838,3 +1902,342 @@ class TestAsDictList:
     def test_empty_list(self):
         from src.modules.validator import _as_dict_list
         assert _as_dict_list([]) == []
+
+
+class TestTransformNavBeaconScan:
+    """Tests for transform_navbeacon_scan method."""
+
+    def test_valid_event(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+            horizons=True,
+            odyssey=True,
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_NAVBEACONSCAN_1_SCHEMA_REF
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T12:20:00Z"
+        assert payload["event"] == "NavBeaconScan"
+        assert payload["SystemAddress"] == 10477373803
+        assert payload["NumBodies"] == 21
+        assert payload["StarSystem"] == "Sol"
+        assert payload["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is True
+
+    def test_schema_ref(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 8,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+        assert message["$schemaRef"] == EDDN_NAVBEACONSCAN_1_SCHEMA_REF
+
+    def test_augments_star_pos_from_session_state(self, validator):
+        """NavBeaconScan lacks StarPos; should be augmented from session_state."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+
+        assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
+
+    def test_augments_star_system_from_session_state(self, validator):
+        """NavBeaconScan lacks StarSystem; should be augmented from session_state."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Alpha Centauri",
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+
+        assert message["message"]["StarSystem"] == "Alpha Centauri"
+
+    def test_does_not_augment_if_system_mismatch(self, validator):
+        """StarPos/StarSystem should not be augmented if SystemAddress doesn't match."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 99999,
+                "NumBodies": 21,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+
+        assert "StarPos" not in message["message"]
+        assert "StarSystem" not in message["message"]
+
+    def test_strips_localised_keys(self, validator):
+        """_Localised keys should be stripped from navbeaconscan/1 messages."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+                "SomeField_Localised": "Should be stripped",
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+
+        assert "SomeField_Localised" not in message["message"]
+
+    def test_preserves_disallowed_fields(self, validator):
+        """Fields like ActiveFine should be stripped by _strip_disallowed."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:20:00Z",
+                "event": "NavBeaconScan",
+                "SystemAddress": 10477373803,
+                "NumBodies": 21,
+                "ActiveFine": True,
+                "Wanted": False,
+            },
+            event_type="NavBeaconScan",
+            timestamp="2026-01-12T12:20:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_navbeacon_scan(event, session_state)
+
+        assert "ActiveFine" not in message["message"]
+        assert "Wanted" not in message["message"]
+
+
+class TestTransformFCMaterials:
+    """Tests for transform_fc_materials method."""
+
+    def _make_fc_materials_data(self, **overrides):
+        """Helper to build valid FCMaterials.json data."""
+        data = {
+            "timestamp": "2026-01-12T16:00:00Z",
+            "event": "FCMaterials",
+            "MarketID": 3706117376,
+            "CarrierName": "Test Carrier",
+            "CarrierID": "ABC-12345",
+            "Items": [
+                {
+                    "id": 1,
+                    "Name": "hydrogenfuel",
+                    "Price": 90,
+                    "Stock": 5000,
+                    "Demand": 0,
+                },
+                {
+                    "id": 2,
+                    "Name": "metallic_alloy",
+                    "Price": 1200,
+                    "Stock": 200,
+                    "Demand": 150,
+                },
+            ],
+        }
+        data.update(overrides)
+        return data
+
+    def test_transform_basic(self, validator):
+        fc_data = self._make_fc_materials_data()
+        session_state = SessionState(horizons=True, odyssey=True)
+
+        message = validator.transform_fc_materials(fc_data, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T16:00:00Z"
+        assert payload["event"] == "FCMaterials"
+        assert payload["MarketID"] == 3706117376
+        assert payload["CarrierName"] == "Test Carrier"
+        assert payload["CarrierID"] == "ABC-12345"
+        assert len(payload["Items"]) == 2
+        assert payload["Items"][0]["Name"] == "hydrogenfuel"
+        assert payload["Items"][0]["Price"] == 90
+        assert payload["Items"][0]["Stock"] == 5000
+        assert payload["Items"][0]["Demand"] == 0
+        assert payload["Items"][1]["Name"] == "metallic_alloy"
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is True
+
+    def test_schema_ref(self, validator):
+        fc_data = self._make_fc_materials_data()
+        session_state = SessionState()
+        message = validator.transform_fc_materials(fc_data, session_state)
+        assert message["$schemaRef"] == EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF
+
+    def test_strips_localised_from_items(self, validator):
+        fc_data = self._make_fc_materials_data(
+            Items=[
+                {
+                    "id": 1,
+                    "Name": "hydrogenfuel",
+                    "Name_Localised": "Hydrogen Fuel",
+                    "Price": 90,
+                    "Stock": 5000,
+                    "Demand": 0,
+                },
+            ],
+        )
+        session_state = SessionState()
+        message = validator.transform_fc_materials(fc_data, session_state)
+
+        item = message["message"]["Items"][0]
+        assert "Name_Localised" not in item
+        assert item["Name"] == "hydrogenfuel"
+
+    def test_empty_items_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data(Items=[])
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_no_items_key_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data()
+        del fc_data["Items"]
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_missing_marketid_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data()
+        del fc_data["MarketID"]
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_missing_carriername_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data()
+        del fc_data["CarrierName"]
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_missing_carrierid_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data()
+        del fc_data["CarrierID"]
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_empty_carriername_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data(CarrierName="")
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_empty_carrierid_returns_none(self, validator):
+        fc_data = self._make_fc_materials_data(CarrierID="")
+        session_state = SessionState()
+        assert validator.transform_fc_materials(fc_data, session_state) is None
+
+    def test_augments_horizons_odyssey(self, validator):
+        fc_data = self._make_fc_materials_data()
+        session_state = SessionState(horizons=False, odyssey=True)
+        message = validator.transform_fc_materials(fc_data, session_state)
+
+        assert message["message"]["horizons"] is False
+        assert message["message"]["odyssey"] is True
+
+    def test_preserves_item_fields(self, validator):
+        """All required item fields (id, Name, Price, Stock, Demand) must be preserved."""
+        fc_data = self._make_fc_materials_data(
+            Items=[
+                {
+                    "id": 42,
+                    "Name": "tritium",
+                    "Price": 4500,
+                    "Stock": 1000,
+                    "Demand": 500,
+                },
+            ],
+        )
+        session_state = SessionState()
+        message = validator.transform_fc_materials(fc_data, session_state)
+
+        item = message["message"]["Items"][0]
+        assert item["id"] == 42
+        assert item["Name"] == "tritium"
+        assert item["Price"] == 4500
+        assert item["Stock"] == 1000
+        assert item["Demand"] == 500
+
+    def test_strips_disallowed_from_items(self, validator):
+        """Disallowed fields (e.g. ActiveFine) should be stripped from Items."""
+        fc_data = self._make_fc_materials_data(
+            Items=[
+                {
+                    "id": 1,
+                    "Name": "hydrogenfuel",
+                    "Price": 90,
+                    "Stock": 5000,
+                    "Demand": 0,
+                    "ActiveFine": True,
+                    "Wanted": False,
+                },
+            ],
+        )
+        session_state = SessionState()
+        message = validator.transform_fc_materials(fc_data, session_state)
+
+        item = message["message"]["Items"][0]
+        assert "ActiveFine" not in item
+        assert "Wanted" not in item
+        assert "id" in item
+        assert "Name" in item

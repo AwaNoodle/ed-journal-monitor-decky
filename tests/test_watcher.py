@@ -13,9 +13,11 @@ from src.modules.constants import (
     EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
+    EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
@@ -743,3 +745,117 @@ class TestDedicatedSchemaRouting:
                 break
         assert batch_call is not None
         assert batch_call.args[0]["$schemaRef"] == EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF
+
+
+class TestNavBeaconScanRouting:
+    """Tests for NavBeaconScan dedicated schema routing."""
+
+    @pytest.mark.asyncio
+    async def test_navbeaconscan_uses_dedicated_schema(self, watcher, tmp_path):
+        """NavBeaconScan should submit to navbeaconscan/1 schema."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T12:20:00Z","event":"NavBeaconScan","SystemAddress":10477373803,"NumBodies":21}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Find the NavBeaconScan submission
+        navbeacon_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "NavBeaconScan":
+                navbeacon_call = call
+                break
+        assert navbeacon_call is not None
+        message = navbeacon_call.args[0]
+        assert message["$schemaRef"] == EDDN_NAVBEACONSCAN_1_SCHEMA_REF
+        assert message["message"]["event"] == "NavBeaconScan"
+        assert message["message"]["NumBodies"] == 21
+        # StarSystem and StarPos should be augmented from session_state
+        assert message["message"]["StarSystem"] == "Sol"
+        assert message["message"]["StarPos"] == [0, 0, 0]
+
+
+class TestFCMaterialsRouting:
+    """Tests for FCMaterials auxiliary file routing."""
+
+    @pytest.mark.asyncio
+    async def test_fcmaterials_event_uses_fcmaterials_json(self, watcher, tmp_path):
+        """FCMaterials event should trigger reading FCMaterials.json and submit to fcmaterials_journal/1."""
+        # Create FCMaterials.json sidecar
+        (tmp_path / "FCMaterials.json").write_text(
+            '{"timestamp":"2026-01-12T16:00:00Z","event":"FCMaterials",'
+            '"MarketID":3706117376,"CarrierName":"Test Carrier","CarrierID":"ABC-12345",'
+            '"Items":[{"id":1,"Name":"hydrogenfuel","Price":90,"Stock":5000,"Demand":0},'
+            '{"id":2,"Name":"metallic_alloy","Price":1200,"Stock":200,"Demand":150}]}\n',
+            encoding="utf-8",
+        )
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T16:00:00Z","event":"FCMaterials","MarketID":3706117376}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        watcher.submitter.submit.assert_awaited_once()
+        message = watcher.submitter.submit.await_args.args[0]
+        assert message["$schemaRef"] == EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF
+        assert message["message"]["event"] == "FCMaterials"
+        assert message["message"]["MarketID"] == 3706117376
+        assert message["message"]["CarrierName"] == "Test Carrier"
+        assert message["message"]["CarrierID"] == "ABC-12345"
+        assert len(message["message"]["Items"]) == 2
+        # Verify event_name is passed for auxiliary schemas
+        call_kwargs = watcher.submitter.submit.await_args.kwargs
+        assert call_kwargs.get("event_name") == "FCMaterials"
+
+    @pytest.mark.asyncio
+    async def test_fcmaterials_event_missing_json_no_submission(self, watcher, tmp_path):
+        """FCMaterials event with no FCMaterials.json file should result in zero submissions."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T16:00:00Z","event":"FCMaterials","MarketID":3706117376}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        watcher.submitter.submit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fcmaterials_empty_items_no_submission(self, watcher, tmp_path):
+        """FCMaterials.json with empty Items should result in no submission."""
+        (tmp_path / "FCMaterials.json").write_text(
+            '{"timestamp":"2026-01-12T16:00:00Z","event":"FCMaterials",'
+            '"MarketID":3706117376,"CarrierName":"Test Carrier","CarrierID":"ABC-12345",'
+            '"Items":[]}\n',
+            encoding="utf-8",
+        )
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T16:00:00Z","event":"FCMaterials","MarketID":3706117376}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        watcher.submitter.submit.assert_not_awaited()

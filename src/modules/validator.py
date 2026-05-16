@@ -13,9 +13,11 @@ from src.modules.constants import (
     EDDN_COMMODITY_3_SCHEMA_REF,
     EDDN_DISALLOWED_FIELDS,
     EDDN_FACTIONS_DISALLOWED_FIELDS,
+    EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
+    EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
@@ -41,6 +43,7 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "FSSSignalDiscovered": ["timestamp", "SystemAddress", "SignalName"],
     "SAASignalsFound": ["timestamp", "StarSystem", "SystemAddress"],
     "CodexEntry": ["timestamp", "SystemAddress", "Name", "Region", "EntryID", "BodyID", "BodyName"],
+    "NavBeaconScan": ["timestamp", "NumBodies"],
 }
 
 
@@ -538,4 +541,83 @@ class EDDNValidator:
                 "horizons": session_state.horizons,
                 "odyssey": session_state.odyssey,
             },
+        }
+
+    def transform_navbeacon_scan(self, event: ParsedEvent, session_state: SessionState) -> dict:
+        """Transform a NavBeaconScan event into navbeaconscan/1 message.
+
+        Strips disallowed fields and _Localised keys, then builds message
+        with required fields: timestamp, event, StarSystem, StarPos,
+        SystemAddress, NumBodies, horizons, odyssey.
+        """
+        # Strip disallowed fields and _Localised
+        message_payload = _strip_disallowed(event.raw)
+
+        # Strip journal/1-only disallowed fields
+        for field in JOURNAL_1_ONLY_DISALLOWED:
+            message_payload.pop(field, None)
+
+        # Augment StarPos from session_state if missing
+        if "StarPos" not in message_payload and session_state.star_pos:
+            event_sys = message_payload.get("SystemAddress")
+            if event_sys is None or event_sys == session_state.system_address:
+                message_payload["StarPos"] = session_state.star_pos
+        # Augment StarSystem from session_state if missing
+        if "StarSystem" not in message_payload and session_state.star_system:
+            event_sys = message_payload.get("SystemAddress")
+            if event_sys is None or event_sys == session_state.system_address:
+                message_payload["StarSystem"] = session_state.star_system
+
+        # Add horizons/odyssey
+        message_payload["horizons"] = session_state.horizons
+        message_payload["odyssey"] = session_state.odyssey
+
+        return {
+            "$schemaRef": EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
+        }
+
+    def transform_fc_materials(self, fc_data: dict, session_state: SessionState) -> dict | None:
+        """Transform FCMaterials.json data into fcmaterials_journal/1 EDDN schema.
+
+        Returns None if required fields are missing or Items list is empty.
+        """
+        timestamp = fc_data.get("timestamp", "")
+        market_id = fc_data.get("MarketID")
+        carrier_name = fc_data.get("CarrierName", "")
+        carrier_id = fc_data.get("CarrierID", "")
+
+        # Validate required top-level fields
+        if not timestamp or not market_id or not carrier_name or not carrier_id:
+            return None
+
+        items = fc_data.get("Items", [])
+        if not isinstance(items, list) or not items:
+            return None
+
+        # Strip _Localised and disallowed fields from each Item
+        cleaned_items = []
+        for item in _as_dict_list(items):
+            cleaned = _strip_disallowed(item)
+            cleaned_items.append(cleaned)
+
+        if not cleaned_items:
+            return None
+
+        message_payload = {
+            "timestamp": timestamp,
+            "event": "FCMaterials",
+            "MarketID": market_id,
+            "CarrierName": carrier_name,
+            "CarrierID": carrier_id,
+            "Items": cleaned_items,
+            "horizons": session_state.horizons,
+            "odyssey": session_state.odyssey,
+        }
+
+        return {
+            "$schemaRef": EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
         }

@@ -258,6 +258,7 @@ class JournalWatcher:
             "FSSDiscoveryScan": self.validator.transform_fss_discovery_scan,
             "ApproachSettlement": self.validator.transform_approach_settlement,
             "CodexEntry": self.validator.transform_codex_entry,
+            "NavBeaconScan": self.validator.transform_navbeacon_scan,
         }
         transformer = transform_dispatch.get(event_type)
         if transformer is None:
@@ -331,6 +332,7 @@ class JournalWatcher:
             "commodity": self.validator.transform_commodity,
             "outfitting": self.validator.transform_outfitting,
             "shipyard": self.validator.transform_shipyard,
+            "fcmaterials": self.validator.transform_fc_materials,
         }
         transformer = transformers.get(auxiliary_schema)
         if transformer is None:

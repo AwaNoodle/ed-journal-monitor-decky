@@ -12,6 +12,8 @@ EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fssdiscoverys
 EDDN_NAVROUTE_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/navroute/1"
 EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/approachsettlement/1"
 EDDN_CODEXENTRY_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/codexentry/1"
+EDDN_NAVBEACONSCAN_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/navbeaconscan/1"
+EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fcmaterials_journal/1"
 
 # Events that should be reported to EDDN
 REPORTABLE_EVENTS = {
@@ -29,18 +31,21 @@ REPORTABLE_EVENTS = {
     "FSSSignalDiscovered",
     "SAASignalsFound",
     "CodexEntry",
+    "NavBeaconScan",
+    "FCMaterials",
 }
 
 # Journal events that require auxiliary JSON files.
 # Each entry maps an event type to its sidecar filename and EDDN schema type.
 # schema "commodity"/"outfitting"/"shipyard"/"navroute" means dedicated transform methods.
-AuxiliarySchemaType = Literal["navroute", "commodity", "outfitting", "shipyard"]
+AuxiliarySchemaType = Literal["navroute", "commodity", "outfitting", "shipyard", "fcmaterials"]
 
 AUXILIARY_FILES: dict[str, dict[str, str]] = {
     "Market": {"filename": "Market.json", "schema": "commodity"},
     "Outfitting": {"filename": "Outfitting.json", "schema": "outfitting"},
     "Shipyard": {"filename": "Shipyard.json", "schema": "shipyard"},
     "NavRoute": {"filename": "NavRoute.json", "schema": "navroute"},
+    "FCMaterials": {"filename": "FCMaterials.json", "schema": "fcmaterials"},
 }
 
 # Events that use non-journal auxiliary schemas (derived from AUXILIARY_FILES)
@@ -54,6 +59,7 @@ DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {
     "FSSDiscoveryScan": {"schema": "fssdiscoveryscan", "schema_ref": EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF},
     "ApproachSettlement": {"schema": "approachsettlement", "schema_ref": EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF},
     "CodexEntry": {"schema": "codexentry", "schema_ref": EDDN_CODEXENTRY_1_SCHEMA_REF},
+    "NavBeaconScan": {"schema": "navbeaconscan", "schema_ref": EDDN_NAVBEACONSCAN_1_SCHEMA_REF},
 }
 
 # Fields that EDDN disallows per journal/1 schema - must be stripped before submission
