@@ -1,0 +1,2 @@
+{"timestamp":"2026-01-12T12:30:00Z", "event":"Scan", "ScanType":"Detailed", "BodyName":"Sol", "BodyID":1, "StarSystem":"Sol", "SystemAddress":10477373803, "DistanceFromArrivalLS":0.0}
+{"timestamp":"2026-01-12T12:35:00Z", "event":"Scan", "ScanType":"NavBeacon", "BodyName":"Alpha Centauri", "BodyID":2, "StarSystem":"Alpha Centauri", "SystemAddress":10477373804, "DistanceFromArrivalLS":10.5}

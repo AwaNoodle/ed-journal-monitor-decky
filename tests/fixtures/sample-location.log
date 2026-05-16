@@ -1,0 +1,2 @@
+{"timestamp":"2026-01-12T12:50:00Z", "event":"Location", "StarSystem":"Sol", "SystemAddress":10477373803, "StarPos":[0.0,0.0,0.0], "SystemAllegiance":"Federation", "SystemEconomy":"High Tech", "SystemGovernment":"Democracy", "SystemSecurity":"High", "Population":22780000000}
+{"timestamp":"2026-01-12T12:55:00Z", "event":"Location", "StarSystem":"Alpha Centauri", "SystemAddress":10477373804, "StarPos":[4.3,5.6,7.8], "SystemAllegiance":"Independent", "SystemEconomy":"Industrial", "SystemGovernment":"Anarchy", "SystemSecurity":"Low", "Population":1500000000}

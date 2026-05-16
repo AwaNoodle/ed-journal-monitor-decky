@@ -1,6 +1,7 @@
 lib-cov
 *.seed
 *.log
+!tests/fixtures/*.log
 *.csv
 *.dat
 *.out
