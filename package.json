@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "rollup -c",
-    "package": "npm run build && rm -rf out && mkdir -p out/ed-journal-monitor/dist out/ed-journal-monitor/bin/src && cp plugin.json main.py package.json LICENSE README.md out/ed-journal-monitor/ && cp dist/index.js out/ed-journal-monitor/dist/ && cp -r src/modules out/ed-journal-monitor/bin/src/ && cd out && zip -r ../ed-journal-monitor.zip ed-journal-monitor && cd .. && rm -rf out",
+    "package": "npm run build && rm -rf out && mkdir -p out/ed-journal-monitor/dist out/ed-journal-monitor/bin/src && cp plugin.json main.py package.json LICENSE README.md out/ed-journal-monitor/ && cp dist/index.js out/ed-journal-monitor/dist/ && cp -r src/modules out/ed-journal-monitor/bin/src/ && cd out && rm -f ../ed-journal-monitor.zip && zip -r ../ed-journal-monitor.zip ed-journal-monitor && cd .. && rm -rf out",
     "watch": "rollup -c -w",
     "test": ".venv/bin/python -m pytest tests/ -v",
     "lint:ts": "tsc --noEmit -p tsconfig.json && eslint src/",
@@ -23,7 +23,7 @@
     "elite-dangerous",
     "eddn"
   ],
-  "author": "",
+  "author": "AwaNoodle",
   "license": "MIT",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
