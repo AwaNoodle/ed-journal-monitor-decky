@@ -83,7 +83,7 @@ The backend SHALL use configurable `uploaderID`, `softwareName`, and `softwareVe
 
 #### Scenario: Default values
 - **WHEN** no custom values are configured
-- **THEN** the backend SHALL use `softwareName: "ed-journal-monitor-decky"` and `softwareVersion` from `package.json`/`plugin.json`
+- **THEN** the backend SHALL use `softwareName: "ED Journal Monitor Decky"` and `softwareVersion` from `package.json`/`plugin.json`
 
 #### Scenario: Custom uploader ID
 - **WHEN** the user configures a custom `uploaderID` via the UI
