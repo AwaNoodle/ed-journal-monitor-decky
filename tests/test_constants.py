@@ -138,15 +138,8 @@ class TestDisallowedFields:
     def test_journal1_only_disallowed_contains_traits(self):
         assert "Traits" in JOURNAL_1_ONLY_DISALLOWED
 
-    def test_journal1_only_disallowed_contains_is_new_entry(self):
-        assert "IsNewEntry" in JOURNAL_1_ONLY_DISALLOWED
-
-    def test_journal1_only_disallowed_contains_new_traits_discovered(self):
-        assert "NewTraitsDiscovered" in JOURNAL_1_ONLY_DISALLOWED
-
     def test_journal1_only_disallowed_complete(self):
-        expected = {"Latitude", "Longitude", "VoucherAmount", "Traits",
-                    "IsNewEntry", "NewTraitsDiscovered"}
+        expected = {"Latitude", "Longitude", "VoucherAmount", "Traits"}
         assert expected == JOURNAL_1_ONLY_DISALLOWED
 
 
@@ -157,12 +150,16 @@ class TestFssSignalDisallowedFields:
     def test_event_in_disallowed(self):
         assert "event" in FSS_SIGNAL_DISALLOWED_FIELDS
 
+    def test_system_address_in_disallowed(self):
+        """SystemAddress belongs at message level, not in individual signals."""
+        assert "SystemAddress" in FSS_SIGNAL_DISALLOWED_FIELDS
+
     def test_timestamp_not_in_disallowed(self):
         """Timestamp must be preserved in signals for fsssignaldiscovered/1 schema."""
         assert "timestamp" not in FSS_SIGNAL_DISALLOWED_FIELDS
 
     def test_complete_set(self):
-        assert {"TimeRemaining", "event"} == FSS_SIGNAL_DISALLOWED_FIELDS
+        assert {"TimeRemaining", "event", "SystemAddress"} == FSS_SIGNAL_DISALLOWED_FIELDS
 
 
 class TestDedicatedSchemaEvents:

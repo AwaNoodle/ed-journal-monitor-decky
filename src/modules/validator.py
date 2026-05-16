@@ -372,7 +372,7 @@ class EDDNValidator:
         codexentry/1: VoucherAmount, Traits, IsNewEntry, NewTraitsDiscovered.
         """
         # Strip disallowed fields, but keep codexentry-specific fields
-        keep_fields = {"VoucherAmount", "Traits", "IsNewEntry", "NewTraitsDiscovered"}
+        keep_fields = {"VoucherAmount", "Traits"}
         message_payload = _strip_disallowed(event.raw, keep_fields=keep_fields)
 
         # Strip journal/1-only disallowed fields EXCEPT the ones we're keeping
@@ -418,6 +418,12 @@ class EDDNValidator:
         for item in _as_dict_list(market_data.get("Items", [])):
             name = item.get("Name")
             if not name or not isinstance(name, str):
+                continue
+
+            # Skip NonMarketable commodities (per EDDN commodity-README)
+            # Journal uses "nonde" prefix for "non-" categories
+            category = item.get("Category", "")
+            if category and "nonde" in category.lower():
                 continue
 
             stock_bracket = item.get("StockBracket", 0)

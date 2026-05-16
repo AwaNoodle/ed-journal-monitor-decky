@@ -69,13 +69,17 @@ EDDN_DISALLOWED_FIELDS = {
     "FuelLevel",
     "FuelUsed",
     "JumpDist",
-    "Progress",
     "Wanted",
+    # Progress — personal scan data in FSSDiscoveryScan, disallowed in fssdiscoveryscan/1
+    "Progress",
+    # IsNewEntry/NewTraitsDiscovered — personal data in CodexEntry, disallowed in codexentry/1
+    "IsNewEntry",
+    "NewTraitsDiscovered",
 }
 
 # Fields disallowed in journal/1 specifically, but valid in some dedicated schemas.
 # These are stripped during journal/1 transform but preserved for dedicated schemas.
-JOURNAL_1_ONLY_DISALLOWED = {"Latitude", "Longitude", "VoucherAmount", "Traits", "IsNewEntry", "NewTraitsDiscovered"}
+JOURNAL_1_ONLY_DISALLOWED = {"Latitude", "Longitude", "VoucherAmount", "Traits"}
 
 # Fields disallowed inside Factions[] items per EDDN journal/1 schema
 EDDN_FACTIONS_DISALLOWED_FIELDS = {
@@ -86,4 +90,4 @@ EDDN_FACTIONS_DISALLOWED_FIELDS = {
 }
 
 # Fields stripped from individual FSSSignalDiscovered signals before batching
-FSS_SIGNAL_DISALLOWED_FIELDS = {"TimeRemaining", "event"}
+FSS_SIGNAL_DISALLOWED_FIELDS = {"TimeRemaining", "event", "SystemAddress"}

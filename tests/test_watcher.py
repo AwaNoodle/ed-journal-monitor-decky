@@ -107,7 +107,7 @@ class TestAuxiliaryFileHandling:
         assert message["$schemaRef"] == EDDN_COMMODITY_3_SCHEMA_REF
         assert message["message"]["stationName"] == "Jameson Memorial"
         assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
-        assert len(message["message"]["commodities"]) == 3
+        assert len(message["message"]["commodities"]) == 2
         # Verify Market is NOT sent as journal/1
         assert message["$schemaRef"] != EDDN_JOURNAL_1_SCHEMA_REF
 

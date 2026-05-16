@@ -224,6 +224,37 @@ class TestAddSignal:
         batch_data = batcher.flush(session_state=session_state)
         assert "SystemAddress" not in batch_data["signals"][0]
 
+    def test_filters_mission_target_signals(self, batcher):
+        """Signals with USSType == $USS_Type_MissionTarget; must be dropped."""
+        mission_event = _make_signal_event(
+            SignalName="Mission Signal",
+            USSType="$USS_Type_MissionTarget;",
+        )
+        normal_event = _make_signal_event(
+            SignalName="Normal Signal",
+            USSType="$USS_Type_Debris;",
+        )
+        batcher.add_signal(mission_event)
+        batcher.add_signal(normal_event)
+
+        session_state = _make_session_state()
+        batch_data = batcher.flush(session_state=session_state)
+        assert batch_data is not None
+        assert len(batch_data["signals"]) == 1
+        assert batch_data["signals"][0]["SignalName"] == "Normal Signal"
+        assert "USSType" not in batch_data["signals"][0] or batch_data["signals"][0].get("USSType") != "$USS_Type_MissionTarget;"  # noqa: E501
+
+    def test_all_mission_target_signals_dropped(self, batcher):
+        """If all signals are mission targets, the batch is discarded."""
+        mission_event = _make_signal_event(
+            USSType="$USS_Type_MissionTarget;",
+        )
+        batcher.add_signal(mission_event)
+
+        session_state = _make_session_state()
+        batch_data = batcher.flush(session_state=session_state)
+        assert batch_data is None  # Empty batch after filtering
+
 
 class TestMetadata:
     """Tests for metadata tracking from FSSSignalDiscovered events."""

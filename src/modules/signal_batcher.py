@@ -56,6 +56,11 @@ class SignalBatcher:
         """
         raw = event.raw
 
+        # Filter out mission target signals — these have no statistical value
+        # and are only useful to the Cmdr with the active mission.
+        if raw.get("USSType") == "$USS_Type_MissionTarget;":
+            return
+
         # Extract signal data: keep everything except disallowed, _Localised,
         # and message-level fields
         signal: dict = {}

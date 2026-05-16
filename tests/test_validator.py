@@ -896,7 +896,6 @@ class TestTransformFSSDiscoveryScan:
                 "StarPos": [0.0, 0.0, 0.0],
                 "BodyCount": 21,
                 "NonBodyCount": 42,
-                "Progress": 0.95,
             },
             event_type="FSSDiscoveryScan",
             timestamp="2026-01-12T12:15:00Z",
@@ -914,7 +913,6 @@ class TestTransformFSSDiscoveryScan:
         assert payload["StarPos"] == [0.0, 0.0, 0.0]
         assert payload["BodyCount"] == 21
         assert payload["NonBodyCount"] == 42
-        assert "Progress" not in payload
         assert payload["horizons"] is True
         assert payload["odyssey"] is True
 
@@ -1016,7 +1014,6 @@ class TestTransformFSSDiscoveryScan:
                 "BodyCount": 21,
                 "NonBodyCount": 42,
                 "ActiveFine": True,
-                "Progress": 0.95,
             },
             event_type="FSSDiscoveryScan",
             timestamp="2026-01-12T12:15:00Z",
@@ -1025,7 +1022,6 @@ class TestTransformFSSDiscoveryScan:
         message = validator.transform_fss_discovery_scan(event, session_state)
 
         assert "ActiveFine" not in message["message"]
-        assert "Progress" not in message["message"]
 
     def test_preserves_system_name(self, validator):
         """EDDN fssdiscoveryscan/1 schema uses SystemName (same as journal), not StarSystem."""
@@ -1049,6 +1045,31 @@ class TestTransformFSSDiscoveryScan:
         payload = message["message"]
         assert payload["SystemName"] == "Sol"
         assert "StarSystem" not in payload
+
+    def test_strips_progress_personal_data(self, validator):
+        """Progress contains personal scan data and must be stripped per fssdiscoveryscan/1 schema."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:15:00Z",
+                "event": "FSSDiscoveryScan",
+                "SystemAddress": 10477373803,
+                "SystemName": "Sol",
+                "BodyCount": 8,
+                "NonBodyCount": 42,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Progress": {
+                    "TotalScans": 50,
+                    "ScannedBodies": ["Sol A", "Sol B"],
+                },
+            },
+            event_type="FSSDiscoveryScan",
+            timestamp="2026-01-12T12:15:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_discovery_scan(event, session_state)
+
+        assert message is not None
+        assert "Progress" not in message["message"]
 
 
 class TestTransformNavRoute:
@@ -1431,8 +1452,8 @@ class TestTransformCodexEntry:
 
         assert message["message"]["Traits"] == ["trait1", "trait2"]
 
-    def test_preserves_is_new_entry(self, validator):
-        """IsNewEntry is valid in codexentry/1 but disallowed in journal/1."""
+    def test_strips_is_new_entry(self, validator):
+        """IsNewEntry is disallowed in codexentry/1 (personal data)."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T15:00:00Z",
@@ -1453,10 +1474,10 @@ class TestTransformCodexEntry:
         session_state = SessionState(horizons=True, odyssey=True)
         message = validator.transform_codex_entry(event, session_state)
 
-        assert message["message"]["IsNewEntry"] is True
+        assert "IsNewEntry" not in message["message"]
 
-    def test_preserves_new_traits_discovered(self, validator):
-        """NewTraitsDiscovered is valid in codexentry/1 but disallowed in journal/1."""
+    def test_strips_new_traits_discovered(self, validator):
+        """NewTraitsDiscovered is disallowed in codexentry/1 (personal data)."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T15:00:00Z",
@@ -1477,7 +1498,7 @@ class TestTransformCodexEntry:
         session_state = SessionState(horizons=True, odyssey=True)
         message = validator.transform_codex_entry(event, session_state)
 
-        assert message["message"]["NewTraitsDiscovered"] is False
+        assert "NewTraitsDiscovered" not in message["message"]
 
     def test_augments_star_pos_from_session_state(self, validator):
         event = ParsedEvent(
@@ -1546,7 +1567,7 @@ class TestTransformCommodity:
         assert payload["marketId"] == 128666762
         assert payload["horizons"] is True
         assert payload["odyssey"] is False
-        assert len(payload["commodities"]) == 3
+        assert len(payload["commodities"]) == 2
         assert payload["commodities"][0] == {
             "name": "hydrogenfuel",
             "meanPrice": 87,
@@ -1558,16 +1579,6 @@ class TestTransformCommodity:
             "demandBracket": 0,
         }
         assert payload["commodities"][1] == {
-            "name": "drones",
-            "meanPrice": 99,
-            "buyPrice": 101,
-            "stock": 9999,
-            "stockBracket": 3,
-            "sellPrice": 95,
-            "demand": 0,
-            "demandBracket": 0,
-        }
-        assert payload["commodities"][2] == {
             "name": "gold",
             "meanPrice": 47113,
             "buyPrice": 0,
@@ -1626,6 +1637,64 @@ class TestTransformCommodity:
             "StationName": "",
             "MarketID": 123,
             "Items": [{"Name": "test", "StockBracket": 1, "DemandBracket": 0}],
+        }
+        assert validator.transform_commodity(market_data, SessionState()) is None
+
+    def test_nonmarketable_category_filtered(self, validator):
+        """NonMarketable items must be excluded per EDDN commodity-README."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                # NonMarketable with high stock bracket — should be filtered
+                {
+                    "Name": "$drones_name;",
+                    "Category": "$u16_nondeMarketable_name;",
+                    "BuyPrice": 101,
+                    "SellPrice": 95,
+                    "MeanPrice": 99,
+                    "Stock": 9999,
+                    "Demand": 0,
+                    "StockBracket": 3,
+                    "DemandBracket": 0,
+                },
+                # Normal commodity — should pass through
+                {
+                    "Name": "$hydrogenfuel_name;",
+                    "Category": "$u17_chemicals_name;",
+                    "BuyPrice": 90,
+                    "SellPrice": 85,
+                    "MeanPrice": 87,
+                    "Stock": 1234,
+                    "Demand": 0,
+                    "StockBracket": 3,
+                    "DemandBracket": 0,
+                },
+            ],
+        }
+        message = validator.transform_commodity(market_data, SessionState())
+        assert message is not None
+        assert len(message["message"]["commodities"]) == 1
+        assert message["message"]["commodities"][0]["name"] == "hydrogenfuel"
+
+    def test_nonmarketable_all_items_filtered(self, validator):
+        """If all items are NonMarketable, transform returns None."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$drones_name;",
+                    "Category": "$u16_nondeMarketable_name;",
+                    "BuyPrice": 101, "SellPrice": 95,
+                    "MeanPrice": 99, "Stock": 9999, "Demand": 0,
+                    "StockBracket": 3, "DemandBracket": 0,
+                },
+            ],
         }
         assert validator.transform_commodity(market_data, SessionState()) is None
 

@@ -105,7 +105,7 @@ class TestEndToEndPipeline:
         assert message["$schemaRef"] == EDDN_COMMODITY_3_SCHEMA_REF
         assert message["message"]["timestamp"] == "2026-01-12T13:05:00Z"
         assert message["message"]["stationName"] == "Jameson Memorial"
-        assert len(message["message"]["commodities"]) == 3
+        assert len(message["message"]["commodities"]) == 2
 
     @pytest.mark.asyncio
     async def test_outfitting_auxiliary_pipeline(self, tmp_path, copy_fixture):
