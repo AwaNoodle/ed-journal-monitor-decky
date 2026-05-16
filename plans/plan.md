@@ -303,6 +303,20 @@ Root cause: On first run (no `last_active`), the `_initial_scan` method only pro
 - 347 tests passing, lint clean
 - **Sol FSDJump mystery resolved**: The `Sol` FSDJump events seen in EDDN are NOT from this plugin — they come from other EDDN contributors with different uploaderIDs. Zero FSDJump events to Sol exist in this device's journal files.
 
+### Phase 9: Fix Minor Code Review Issues (2026-05-16)
+
+Root cause: Release readiness code review flagged minor improvements.
+
+### Changes applied:
+- **constants.py**: Added `SOFTWARE_NAME` and `SOFTWARE_VERSION` module-level constants
+- **submitter.py**: Replaced hardcoded `"ED Journal Monitor Decky"` and `"0.1.0"` string literals with references to `constants.SOFTWARE_NAME` and `constants.SOFTWARE_VERSION`
+- **m1 (softwareName constant)**: ✅ Resolved — single source of truth for plugin identity strings
+- **m2 (empty py_modules/)**: ⏭ Ignored per user instruction
+- **m3 (OpenSpec not archived)**: ✅ Verified already archived — `openspec/changes/archive/2026-05-16-add-diagnostic-bundle/`
+- **m4 (softwareName spec discrepancy)**: ⏭ Accepting human-readable name for now
+- **m5 (package.json version)**: ⏭ 0.1.0 is acceptable for first release
+- 385 tests passing, lint clean
+
 ## Documentation Review (2026-05-10)
 - Reviewed README.md and AGENTS.md for accuracy against codebase
 - **README.md fixes**: Added NavRoute to auxiliary table, added missing architecture diagram nodes (Activity log, Diagnostics, Constants), added directional arrows (callable vs decky.emit), added full Configuration section (enabled, detailed_logging, uploader_id auto-detection, poll_interval, all settings table), added EDDN upload endpoint, added UI Panel description, added Event Flow walkthrough, added Emitted Events table, added Troubleshooting section (SSL certs, journal path, EDDN failures, ED detection, system resume), added Known Limitations section, added Diagnostic Bundle contents table, softened "no manual setup required" to "for Steam installs", added Proton username note, aligned test command with package.json

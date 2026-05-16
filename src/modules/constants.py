@@ -2,6 +2,10 @@
 
 from typing import Literal
 
+# Plugin identity (used in EDDN submission headers)
+SOFTWARE_NAME = "ED Journal Monitor Decky"
+SOFTWARE_VERSION = "0.1.0"
+
 # EDDN schema references
 EDDN_JOURNAL_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/journal/1"
 EDDN_COMMODITY_3_SCHEMA_REF = "https://eddn.edcd.io/schemas/commodity/3"

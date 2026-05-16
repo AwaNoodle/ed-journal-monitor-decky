@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from src.modules.activity_log import ActivityLog
     from src.modules.settings import PluginSettings
 
+from src.modules import constants
+
 EDDN_URL = "https://eddn.edcd.io:4430/upload/"
 DEFAULT_TIMEOUT = 10  # seconds
 MAX_RETRIES = 3
@@ -118,8 +120,8 @@ class EDDNSubmitter:
         # Populate header
         header = {
             "uploaderID": self.settings.get("uploader_id", ""),
-            "softwareName": "ED Journal Monitor Decky",
-            "softwareVersion": self.settings.get("software_version", "0.1.0"),
+            "softwareName": constants.SOFTWARE_NAME,
+            "softwareVersion": self.settings.get("software_version", constants.SOFTWARE_VERSION),
             "gatewayTimestamp": datetime.now(timezone.utc).isoformat(),
         }
         if game_version:
@@ -198,7 +200,10 @@ class EDDNSubmitter:
                     data=payload,
                     headers={
                         "Content-Type": "application/json",
-                        "User-Agent": f"ed-journal-monitor-decky/{self.settings.get('software_version', '0.1.0')}",
+                        "User-Agent": (
+                            f"ed-journal-monitor-decky/"
+                            f"{self.settings.get('software_version', constants.SOFTWARE_VERSION)}"
+                        ),
                     },
                     method="POST",
                 )
