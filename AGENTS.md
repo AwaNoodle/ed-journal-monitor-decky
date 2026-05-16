@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (334 tests, all passing)
+- Tests: pytest + pytest-asyncio (349 tests, all passing)
 - Known on-device issue: Decky Loader's PyInstaller-embedded Python 3.11 can't find system SSL certs; submitter uses `_build_ssl_context()` with explicit CA bundle cascade (env → certifi → system paths)
 
 ## Architecture
@@ -27,6 +27,14 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Ensure there is a verifiable way to confirm a change is successful (e.g., passing tests, manual verification steps documented in the task)
 - Always run tests & lint/typecheck before committing or marking a task complete — all tests must pass
 - Keep this file (AGENTS.md) and README.md up-to-date after implementing any change
+
+## Reporting
+- All report and review output (code reviews, diagnostics, analysis, etc.) must be written to the `./reports/` folder
+
+## EDDN Compliance
+- All changes **MUST** follow the guidelines in the [EDDN Developers Guide](https://github.com/EDCD/EDDN/blob/live/docs/Developers.md)
+- All schema handling **MUST** match the requirements documented in each schema's README file in the [EDDN live schemas folder](https://github.com/EDCD/EDDN/blob/live/schemas)
+- When modifying any event transformation, validation, filtering, or submission logic, cross-reference the relevant schema README before implementing
 
 ## Key Files
 - `main.py` — Plugin entry point, wires all backend modules

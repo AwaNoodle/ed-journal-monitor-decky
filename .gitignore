@@ -65,3 +65,6 @@ cli/decky
 # Python virtual environment
 .venv/
 example-events/
+
+# Reports and review output
+reports/
