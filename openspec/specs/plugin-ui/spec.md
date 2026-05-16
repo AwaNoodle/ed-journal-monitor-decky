@@ -80,3 +80,25 @@ The frontend SHALL display the currently configured journal path.
 #### Scenario: Manually set path
 - **WHEN** the journal path was set by the user
 - **THEN** the panel SHALL display the path with a "Manual" label
+
+### Requirement: Display diagnostics section
+The frontend SHALL display a Diagnostics section in the panel with a detailed logging toggle and a bundle creation button.
+
+#### Scenario: Diagnostics section visible
+- **WHEN** the plugin panel is displayed
+- **THEN** a Diagnostics section SHALL be visible with a "Detailed Logging" toggle and a "Create Diagnostic Bundle" button
+
+#### Scenario: Detailed logging toggle
+- **WHEN** the user toggles "Detailed Logging" on
+- **THEN** the frontend SHALL call `set_detailed_logging(true)`
+- **WHEN** the user toggles "Detailed Logging" off
+- **THEN** the frontend SHALL call `set_detailed_logging(false)`
+
+#### Scenario: Create diagnostic bundle
+- **WHEN** the user clicks "Create Diagnostic Bundle"
+- **THEN** the frontend SHALL call `create_diagnostics()`
+- **THEN** the panel SHALL display the zip file path
+
+#### Scenario: Bundle creation fails
+- **WHEN** `create_diagnostics()` returns `{ "success": false }`
+- **THEN** the panel SHALL display an error message
