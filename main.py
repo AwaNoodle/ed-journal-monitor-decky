@@ -5,6 +5,7 @@ Monitors Elite Dangerous journal files and submits events to EDDN.
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -45,6 +46,17 @@ class Plugin:
         # Initialize settings
         self.settings = PluginSettings()
         await self.settings.load()
+
+        # Read version from package.json and persist to settings for EDDN headers
+        pkg_json = Path(__file__).parent / "package.json"
+        if pkg_json.exists():
+            pkg_data = json.loads(pkg_json.read_text())
+            version = pkg_data.get("version", "0.1.0")
+            await self.settings.set("software_version", version)
+            decky.logger.info(f"ED Journal Monitor v{version}")
+        else:
+            await self.settings.set("software_version", "0.1.0")
+            decky.logger.warning("package.json not found, using default version 0.1.0")
 
         # Initialize components
         self.path_finder = JournalPathFinder(self.settings)

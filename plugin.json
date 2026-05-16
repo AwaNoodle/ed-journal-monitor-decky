@@ -1,11 +1,11 @@
 {
   "name": "ED Journal Monitor",
-  "author": "",
+  "author": "AwaNoodle",
   "flags": [],
   "api_version": 1,
   "publish": {
     "tags": ["elite-dangerous", "eddn", "journal", "utility"],
     "description": "Monitors Elite Dangerous journal files and submits events to the Elite Dangerous Data Network (EDDN).",
-    "image": ""
+    "image": null
   }
 }
