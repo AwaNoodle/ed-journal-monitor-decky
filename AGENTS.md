@@ -46,6 +46,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - `src/Content.tsx` — Frontend: UI panel (status, configuration, recent errors, recent activity, diagnostics)
 - `tests/` — All Python tests (run with `PYTHONPATH=. .venv/bin/python -m pytest tests/ -v` or `npm run test`)
 - `plugin.json` — Decky plugin metadata (no root flag)
+- `developer-guide.md` — Architecture, event flow, known limitations, dev setup
 
 ## Deployment
 - Package: `npm run package` → produces `ed-journal-monitor.zip`
