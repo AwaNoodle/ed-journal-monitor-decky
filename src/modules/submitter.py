@@ -275,6 +275,13 @@ class EDDNSubmitter:
             "last_upload_event": self._last_upload_event,
         }
 
+    def reset_stats(self) -> None:
+        """Reset all upload statistics. Called when ED starts a new session."""
+        self._success_count = 0
+        self._fail_count = 0
+        self._last_upload_time = None
+        self._last_upload_event = None
+
 
 async def asyncio_sleep(seconds: float) -> None:
     """Async sleep helper for testability."""

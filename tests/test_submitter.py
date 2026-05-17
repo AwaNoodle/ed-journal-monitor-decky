@@ -541,3 +541,63 @@ class TestStats:
         stats = submitter.get_stats()
         assert stats["success_count"] == 0
         assert stats["fail_count"] == 1
+
+
+class TestResetStats:
+    """Tests for resetting upload statistics on ED session start."""
+
+    def test_reset_stats_clears_all_counters(self):
+        """After submissions, reset_stats() zeros all counters."""
+        submitter = EDDNSubmitter(MockSettings(initial_data={"uploader_id": "test", "software_version": "0.1.0"}))
+        # Manually set counters to simulate prior activity
+        submitter._success_count = 5
+        submitter._fail_count = 2
+        submitter._last_upload_time = "2025-01-01T00:00:00+00:00"
+        submitter._last_upload_event = "FSDJump"
+
+        submitter.reset_stats()
+
+        stats = submitter.get_stats()
+        assert stats["success_count"] == 0
+        assert stats["fail_count"] == 0
+        assert stats["last_upload_time"] is None
+        assert stats["last_upload_event"] is None
+
+    def test_reset_stats_is_idempotent(self):
+        """Calling reset_stats() multiple times is safe."""
+        submitter = EDDNSubmitter(MockSettings(initial_data={"uploader_id": "test", "software_version": "0.1.0"}))
+
+        submitter.reset_stats()
+        submitter.reset_stats()
+
+        stats = submitter.get_stats()
+        assert stats["success_count"] == 0
+        assert stats["fail_count"] == 0
+        assert stats["last_upload_time"] is None
+        assert stats["last_upload_event"] is None
+
+    @pytest.mark.asyncio
+    async def test_reset_stats_does_not_clear_activity_log(self):
+        """Resetting stats preserves activity log entries."""
+        from src.modules.activity_log import ActivityLog
+
+        log = ActivityLog()
+        submitter = EDDNSubmitter(MockSettings(), activity_log=log)
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "FSDJump"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                await submitter.submit(message)
+
+        assert len(log.get_recent()) == 1  # Activity recorded
+
+        submitter.reset_stats()
+
+        assert len(log.get_recent()) == 1  # Still present after reset

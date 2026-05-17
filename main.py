@@ -196,6 +196,9 @@ class Plugin:
         if enabled == self.ed_running:
             return {"success": True}
         self.ed_running = enabled
+        if enabled and self.submitter:
+            self.submitter.reset_stats()
+            await decky.emit("status_update", self.submitter.get_stats())
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 

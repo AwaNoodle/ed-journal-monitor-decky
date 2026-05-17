@@ -2,7 +2,7 @@
 Tests for the set_ed_running callable and ed_running state tracking.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -23,8 +23,9 @@ class TestSetEdRunning:
 
     @pytest.mark.asyncio
     async def test_set_ed_running_true(self):
-        """set_ed_running(true) updates state and emits event."""
+        """set_ed_running(true) updates state, resets stats, and emits events."""
         plugin = Plugin()
+        plugin.submitter = MagicMock()
         emitted_events = []
 
         async def mock_emit(event, data):
@@ -35,8 +36,10 @@ class TestSetEdRunning:
 
         assert result == {"success": True}
         assert plugin.ed_running is True
-        assert len(emitted_events) == 1
-        assert emitted_events[0] == ("ed_state_change", {"ed_running": True})
+        plugin.submitter.reset_stats.assert_called_once()
+        assert len(emitted_events) == 2
+        assert emitted_events[0] == ("status_update", plugin.submitter.get_stats.return_value)
+        assert emitted_events[1] == ("ed_state_change", {"ed_running": True})
 
     @pytest.mark.asyncio
     async def test_set_ed_running_false(self):
@@ -105,6 +108,55 @@ class TestSetEdRunning:
 
         assert len(emitted_events) == 1
         assert emitted_events[0] == ("ed_state_change", {"ed_running": False})
+
+    @pytest.mark.asyncio
+    async def test_set_ed_running_true_resets_submitter_stats(self):
+        """set_ed_running(true) calls reset_stats on the submitter."""
+        plugin = Plugin()
+        plugin.submitter = MagicMock()
+        plugin.submitter.get_stats.return_value = {"success_count": 0, "fail_count": 0}
+
+        with patch("decky.emit", new_callable=AsyncMock):
+            await plugin.set_ed_running(True)
+
+        plugin.submitter.reset_stats.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_set_ed_running_true_emits_status_update(self):
+        """set_ed_running(true) emits status_update with zeroed stats."""
+        plugin = Plugin()
+        plugin.submitter = MagicMock()
+        plugin.submitter.get_stats.return_value = {
+            "success_count": 0,
+            "fail_count": 0,
+            "last_upload_time": None,
+            "last_upload_event": None,
+        }
+        emitted_events = []
+
+        async def mock_emit(event, data):
+            emitted_events.append((event, data))
+
+        with patch("decky.emit", side_effect=mock_emit):
+            await plugin.set_ed_running(True)
+
+        status_update = next(e for e in emitted_events if e[0] == "status_update")
+        assert status_update[1]["success_count"] == 0
+        assert status_update[1]["fail_count"] == 0
+        assert status_update[1]["last_upload_time"] is None
+        assert status_update[1]["last_upload_event"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_ed_running_false_does_not_reset_stats(self):
+        """set_ed_running(false) does NOT call reset_stats."""
+        plugin = Plugin()
+        plugin.ed_running = True
+        plugin.submitter = MagicMock()
+
+        with patch("decky.emit", new_callable=AsyncMock):
+            await plugin.set_ed_running(False)
+
+        plugin.submitter.reset_stats.assert_not_called()
 
 
 class TestGetStatusEdRunning:
