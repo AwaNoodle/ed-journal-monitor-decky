@@ -220,5 +220,5 @@ class TestDedicatedSchemaEvents:
         assert entry["schema"] == "navbeaconscan"
         assert entry["schema_ref"] == EDDN_NAVBEACONSCAN_1_SCHEMA_REF
 
-    def test_only_five_dedicated_events(self):
-        assert len(DEDICATED_SCHEMA_EVENTS) == 5
+    def test_only_six_dedicated_events(self):
+        assert len(DEDICATED_SCHEMA_EVENTS) == 6
