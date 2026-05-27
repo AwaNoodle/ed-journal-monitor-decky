@@ -259,6 +259,7 @@ class JournalWatcher:
             "ApproachSettlement": self.validator.transform_approach_settlement,
             "CodexEntry": self.validator.transform_codex_entry,
             "NavBeaconScan": self.validator.transform_navbeacon_scan,
+            "FSSAllBodiesFound": self.validator.transform_fss_all_bodies_found,
         }
         transformer = transform_dispatch.get(event_type)
         if transformer is None:

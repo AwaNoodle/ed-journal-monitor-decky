@@ -14,6 +14,7 @@ from src.modules.constants import (
     EDDN_DISALLOWED_FIELDS,
     EDDN_FACTIONS_DISALLOWED_FIELDS,
     EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
+    EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
@@ -44,6 +45,7 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "SAASignalsFound": ["timestamp", "StarSystem", "SystemAddress"],
     "CodexEntry": ["timestamp", "SystemAddress", "Name", "Region", "EntryID", "BodyID", "BodyName"],
     "NavBeaconScan": ["timestamp", "NumBodies"],
+    "FSSAllBodiesFound": ["timestamp", "SystemName", "SystemAddress", "Count"],
 }
 
 
@@ -574,6 +576,44 @@ class EDDNValidator:
 
         return {
             "$schemaRef": EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
+        }
+
+    def transform_fss_all_bodies_found(
+        self, event: ParsedEvent, session_state: SessionState
+    ) -> dict:
+        """Transform an FSSAllBodiesFound event into fssallbodiesfound/1 message.
+
+        Strips disallowed fields and _Localised keys, augments StarPos from
+        session state (not present in the journal event), and injects
+        horizons/odyssey flags.
+        """
+        # Strip disallowed fields and _Localised
+        message_payload = _strip_disallowed(event.raw)
+
+        # Strip journal/1-only disallowed fields
+        for field in JOURNAL_1_ONLY_DISALLOWED:
+            message_payload.pop(field, None)
+
+        # Augment StarPos from session_state (not in journal event)
+        if "StarPos" not in message_payload and session_state.star_pos:
+            event_sys = message_payload.get("SystemAddress")
+            if event_sys is None or event_sys == session_state.system_address:
+                message_payload["StarPos"] = session_state.star_pos
+
+        # Augment SystemName from session_state if missing
+        if "SystemName" not in message_payload and session_state.star_system:
+            event_sys = message_payload.get("SystemAddress")
+            if event_sys is None or event_sys == session_state.system_address:
+                message_payload["SystemName"] = session_state.star_system
+
+        # Add horizons/odyssey
+        message_payload["horizons"] = session_state.horizons
+        message_payload["odyssey"] = session_state.odyssey
+
+        return {
+            "$schemaRef": EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
             "header": {},
             "message": message_payload,
         }

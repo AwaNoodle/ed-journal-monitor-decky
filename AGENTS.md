@@ -26,7 +26,9 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Always write tests before (or alongside) implementing a change — prefer delegating test creation to a subagent or specialized agent when available
 - Ensure there is a verifiable way to confirm a change is successful (e.g., passing tests, manual verification steps documented in the task)
 - Always run tests & lint/typecheck before committing or marking a task complete — all tests must pass
-- Keep this file (AGENTS.md) and README.md up-to-date after implementing any change
+- Keep this file (AGENTS.md) up-to-date after implementing any change
+- After implementing any change, update `README.md` if user-facing behavior, features, or supported events have changed
+- After implementing any change, add an entry under `[Unreleased]` in `CHANGELOG.md`
 - When tagging a new release, update `CHANGELOG.md`: move `[Unreleased]` entries under the new version header with the release date, and add a fresh `[Unreleased]` section
 
 ## Reporting

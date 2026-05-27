@@ -7,6 +7,7 @@ from src.modules.constants import (
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
     EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
+    EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
@@ -477,6 +478,16 @@ class TestValidateNewJournalEvents:
                     "EntryID": 123,
                     "BodyID": 1,
                     "BodyName": "Earth",
+                },
+            ),
+            (
+                "FSSAllBodiesFound",
+                {
+                    "timestamp": "2026-01-12T16:00:00Z",
+                    "event": "FSSAllBodiesFound",
+                    "SystemName": "Sol",
+                    "SystemAddress": 10477373803,
+                    "Count": 21,
                 },
             ),
         ],
@@ -2241,3 +2252,269 @@ class TestTransformFCMaterials:
         assert "Wanted" not in item
         assert "id" in item
         assert "Name" in item
+
+
+class TestValidateFSSAllBodiesFound:
+    """Tests for FSSAllBodiesFound validation."""
+
+    def test_valid_event_with_native_starpos(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        assert validator.validate(event) is True
+
+    def test_valid_event_with_session_state_augmentation(self, validator):
+        """StarPos augmented from session_state when not in the journal event."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is True
+
+    def test_rejected_without_session_state(self, validator):
+        """No StarPos in journal, no session_state — validation fails."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        assert validator.validate(event) is False
+
+    def test_rejected_system_address_mismatch(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Alpha Centauri",
+                "SystemAddress": 99999,
+                "Count": 7,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is False
+
+    def test_rejected_missing_system_name(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        assert validator.validate(event) is False
+
+    def test_rejected_missing_system_address(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        assert validator.validate(event) is False
+
+    def test_rejected_missing_count(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        assert validator.validate(event) is False
+
+
+class TestTransformFSSAllBodiesFound:
+    """Tests for transform_fss_all_bodies_found method."""
+
+    def test_valid_transform(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+
+        assert message is not None
+        assert message["$schemaRef"] == EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF
+        payload = message["message"]
+        assert payload["timestamp"] == "2026-01-12T16:00:00Z"
+        assert payload["event"] == "FSSAllBodiesFound"
+        assert payload["SystemName"] == "Sol"
+        assert payload["SystemAddress"] == 10477373803
+        assert payload["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["Count"] == 21
+        assert payload["horizons"] is True
+        assert payload["odyssey"] is True
+
+    def test_schema_ref(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+        )
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+        assert message["$schemaRef"] == EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF
+
+    def test_augments_starpos_from_session_state(self, validator):
+        """StarPos is not in the journal event; must come from session_state."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[1.0, 2.0, 3.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+
+        assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
+
+    def test_count_passthrough(self, validator):
+        """Count passes through unchanged from journal to EDDN message."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Col 285 Sector ZZ-P b21-3",
+                "SystemAddress": 987654321,
+                "StarPos": [10.5, -20.3, 100.0],
+                "Count": 47,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=False)
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+
+        assert message["message"]["Count"] == 47
+
+    def test_augments_horizons_odyssey(self, validator):
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(horizons=False, odyssey=True)
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+
+        assert message["message"]["horizons"] is False
+        assert message["message"]["odyssey"] is True
+
+    def test_strips_disallowed_fields(self, validator):
+        """Disallowed fields like ActiveFine should be stripped."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+                "ActiveFine": True,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+
+        assert "ActiveFine" not in message["message"]
+
+    def test_strips_localised_keys(self, validator):
+        """_Localised keys should be stripped from the payload."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T16:00:00Z",
+                "event": "FSSAllBodiesFound",
+                "SystemName": "Sol",
+                "SystemName_Localised": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+                "Count": 21,
+            },
+            event_type="FSSAllBodiesFound",
+            timestamp="2026-01-12T16:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_fss_all_bodies_found(event, session_state)
+
+        assert "SystemName_Localised" not in message["message"]
+        assert message["message"]["SystemName"] == "Sol"

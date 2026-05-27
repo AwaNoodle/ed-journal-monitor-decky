@@ -18,6 +18,7 @@ EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/approachset
 EDDN_CODEXENTRY_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/codexentry/1"
 EDDN_NAVBEACONSCAN_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/navbeaconscan/1"
 EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fcmaterials_journal/1"
+EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fssallbodiesfound/1"
 
 # Events that should be reported to EDDN
 REPORTABLE_EVENTS = {
@@ -37,6 +38,7 @@ REPORTABLE_EVENTS = {
     "CodexEntry",
     "NavBeaconScan",
     "FCMaterials",
+    "FSSAllBodiesFound",
 }
 
 # Journal events that require auxiliary JSON files.
@@ -64,6 +66,7 @@ DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {
     "ApproachSettlement": {"schema": "approachsettlement", "schema_ref": EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF},
     "CodexEntry": {"schema": "codexentry", "schema_ref": EDDN_CODEXENTRY_1_SCHEMA_REF},
     "NavBeaconScan": {"schema": "navbeaconscan", "schema_ref": EDDN_NAVBEACONSCAN_1_SCHEMA_REF},
+    "FSSAllBodiesFound": {"schema": "fssallbodiesfound", "schema_ref": EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF},
 }
 
 # Fields that EDDN disallows per journal/1 schema - must be stripped before submission
