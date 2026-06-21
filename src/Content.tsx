@@ -254,6 +254,23 @@ const Content = (): JSX.Element => {
         )}
       </PanelSection>
 
+      <PanelSection title="Recent Activity">
+        {recentActivity.length === 0 ? (
+          <PanelSectionRow>
+            <Field>No activity yet</Field>
+          </PanelSectionRow>
+        ) : (
+          recentActivity.map((entry: ActivityEntry): JSX.Element => (
+            <PanelSectionRow key={getActivityKey(entry)}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <span>{entry.outcome === "success" ? "✅" : "❌"} {entry.event_type}</span>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+              </div>
+            </PanelSectionRow>
+          ))
+        )}
+      </PanelSection>
+
       <PanelSection title="Configuration">
         {journalPath && (
           <PanelSectionRow>
@@ -328,23 +345,6 @@ const Content = (): JSX.Element => {
                   <div>{entry.error_message}{entry.http_status != null ? ` (${String(entry.http_status)})` : ""}</div>
                 </div>
               </Field>
-            </PanelSectionRow>
-          ))
-        )}
-      </PanelSection>
-
-      <PanelSection title="Recent Activity">
-        {recentActivity.length === 0 ? (
-          <PanelSectionRow>
-            <Field>No activity yet</Field>
-          </PanelSectionRow>
-        ) : (
-          recentActivity.map((entry: ActivityEntry): JSX.Element => (
-            <PanelSectionRow key={getActivityKey(entry)}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <span>{entry.outcome === "success" ? "✅" : "❌"} {entry.event_type}</span>
-                <span style={{ fontSize: "12px", opacity: 0.7 }}>{new Date(entry.timestamp).toLocaleTimeString()}</span>
-              </div>
             </PanelSectionRow>
           ))
         )}
