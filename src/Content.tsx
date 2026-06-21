@@ -341,9 +341,10 @@ const Content = (): JSX.Element => {
         ) : (
           recentActivity.map((entry: ActivityEntry): JSX.Element => (
             <PanelSectionRow key={getActivityKey(entry)}>
-              <Field>
-                {entry.outcome === "success" ? "✅" : "❌"} {entry.event_type} — {new Date(entry.timestamp).toLocaleTimeString()}
-              </Field>
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <span>{entry.outcome === "success" ? "✅" : "❌"} {entry.event_type}</span>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+              </div>
             </PanelSectionRow>
           ))
         )}

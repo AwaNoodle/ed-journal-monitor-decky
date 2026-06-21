@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - EDDN submission for `FSSAllBodiesFound` events (fssallbodiesfound/1 schema)
 
+### Fixed
+
+- Recent Activity list layout changed from right-biased to left-biased alignment. Event type and timestamp now display on separate lines, flush left, improving readability in the narrow Steam Deck panel.
+
 ## [0.1.0] - 2026-05-16
 
 ### Added
