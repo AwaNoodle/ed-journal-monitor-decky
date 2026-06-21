@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-22
+
 ### Added
 
 - EDDN submission for `FSSAllBodiesFound` events (fssallbodiesfound/1 schema)
@@ -13,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Recent Activity list layout changed from right-biased to left-biased alignment. Event type and timestamp now display on separate lines, flush left, improving readability in the narrow Steam Deck panel.
+- Recent Activity section moved to appear immediately after Status (above Configuration), making upload activity visible without scrolling past configuration fields.
 
 ## [0.1.0] - 2026-05-16
 
