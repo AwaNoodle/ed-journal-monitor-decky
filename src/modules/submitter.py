@@ -96,8 +96,6 @@ class EDDNSubmitter:
         self._ssl_context: ssl.SSLContext = _build_ssl_context()
         self._success_count: int = 0
         self._fail_count: int = 0
-        self._last_upload_time: str | None = None
-        self._last_upload_event: str | None = None
         self._last_error_message: str | None = None
         self._last_http_status: int | None = None
 
@@ -138,8 +136,6 @@ class EDDNSubmitter:
 
         if success:
             self._success_count += 1
-            self._last_upload_time = datetime.now(timezone.utc).isoformat()
-            self._last_upload_event = resolved_name
             if self.activity_log:
                 try:
                     await self.activity_log.record_success(resolved_name)
@@ -271,16 +267,12 @@ class EDDNSubmitter:
         return {
             "success_count": self._success_count,
             "fail_count": self._fail_count,
-            "last_upload_time": self._last_upload_time,
-            "last_upload_event": self._last_upload_event,
         }
 
     def reset_stats(self) -> None:
         """Reset all upload statistics. Called when ED starts a new session."""
         self._success_count = 0
         self._fail_count = 0
-        self._last_upload_time = None
-        self._last_upload_event = None
 
 
 async def asyncio_sleep(seconds: float) -> None:

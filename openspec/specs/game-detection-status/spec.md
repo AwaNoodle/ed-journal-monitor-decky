@@ -80,12 +80,12 @@ The UI SHALL display two independent status fields labeled "ED Status" and "Jour
 #### Scenario: ED running, watcher active
 - **WHEN** `ed_running` is `true` and the watcher is running
 - **THEN** "ED Status" SHALL display "🟢 Running"
-- **THEN** "Journal Status" SHALL display "🟢 Watching & Uploading"
+- **THEN** "Journal Status" SHALL display "🟢 Watching"
 
 #### Scenario: ED not running, watcher active
 - **WHEN** `ed_running` is `false` and the watcher is running
 - **THEN** "ED Status" SHALL display "⚪ Not Running"
-- **THEN** "Journal Status" SHALL display "🟢 Watching & Uploading"
+- **THEN** "Journal Status" SHALL display "🟢 Watching"
 
 ### Requirement: UI listens to ed_state_change event
 The frontend SHALL listen for the `ed_state_change` backend event and update the ED Status display in real-time.

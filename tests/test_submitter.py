@@ -307,25 +307,6 @@ class TestActivityLogIntegration:
         success_call = next(c for c in emit_calls if c[0][0] == "upload_success")
         assert success_call[0][1]["event_name"] == "FSDJump"
 
-    @pytest.mark.asyncio
-    async def test_get_stats_includes_last_upload_event(self):
-        submitter = EDDNSubmitter(MockSettings())
-        message = {"$schemaRef": "", "header": {}, "message": {"event": "Docked"}}
-
-        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
-            mock_response = MagicMock()
-            mock_response.status = 200
-            mock_response.__enter__ = lambda s: s
-            mock_response.__exit__ = MagicMock(return_value=False)
-            mock_urlopen.return_value = mock_response
-
-            with patch("src.modules.submitter.decky") as mock_decky:
-                mock_decky.emit = AsyncMock()
-                await submitter.submit(message)
-
-        stats = submitter.get_stats()
-        assert stats["last_upload_event"] == "Docked"
-
 
 class TestSSLContext:
     """Tests for SSL context construction (PyInstaller/Decky fix)."""
@@ -453,51 +434,6 @@ class TestEventNameOverride:
         assert len(entries) == 1
         assert entries[0]["event_type"] == "Market"  # Not "unknown"
 
-    @pytest.mark.asyncio
-    async def test_event_name_override_used_in_stats(self):
-        submitter = EDDNSubmitter(MockSettings())
-        message = {
-            "$schemaRef": "https://eddn.edcd.io/schemas/outfitting/2",
-            "header": {},
-            "message": {"systemName": "Sol", "stationName": "Test", "modules": []},
-        }
-
-        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
-            mock_response = MagicMock()
-            mock_response.status = 200
-            mock_response.__enter__ = lambda s: s
-            mock_response.__exit__ = MagicMock(return_value=False)
-            mock_urlopen.return_value = mock_response
-
-            with patch("src.modules.submitter.decky") as mock_decky:
-                mock_decky.emit = AsyncMock()
-                await submitter.submit(message, event_name="Outfitting")
-
-        stats = submitter.get_stats()
-        assert stats["last_upload_event"] == "Outfitting"  # Not "unknown"
-
-    @pytest.mark.asyncio
-    async def test_event_name_defaults_to_message_event(self, submitter):
-        """When event_name is not provided, it falls back to message['event']."""
-        message = {
-            "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
-            "header": {},
-            "message": {"event": "FSDJump", "StarSystem": "Sol"},
-        }
-
-        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
-            mock_response = MagicMock()
-            mock_response.status = 200
-            mock_response.__enter__ = lambda s: s
-            mock_response.__exit__ = MagicMock(return_value=False)
-            mock_urlopen.return_value = mock_response
-
-            with patch("src.modules.submitter.decky") as mock_decky:
-                mock_decky.emit = AsyncMock()
-                await submitter.submit(message)
-
-        stats = submitter.get_stats()
-        assert stats["last_upload_event"] == "FSDJump"
 
 
 class TestStats:
@@ -552,16 +488,12 @@ class TestResetStats:
         # Manually set counters to simulate prior activity
         submitter._success_count = 5
         submitter._fail_count = 2
-        submitter._last_upload_time = "2025-01-01T00:00:00+00:00"
-        submitter._last_upload_event = "FSDJump"
 
         submitter.reset_stats()
 
         stats = submitter.get_stats()
         assert stats["success_count"] == 0
         assert stats["fail_count"] == 0
-        assert stats["last_upload_time"] is None
-        assert stats["last_upload_event"] is None
 
     def test_reset_stats_is_idempotent(self):
         """Calling reset_stats() multiple times is safe."""
@@ -573,8 +505,6 @@ class TestResetStats:
         stats = submitter.get_stats()
         assert stats["success_count"] == 0
         assert stats["fail_count"] == 0
-        assert stats["last_upload_time"] is None
-        assert stats["last_upload_event"] is None
 
     @pytest.mark.asyncio
     async def test_reset_stats_does_not_clear_activity_log(self):

@@ -17,8 +17,6 @@ declare module "*.jpg" {
 interface StatusUpdateEvent {
   success_count: number;
   fail_count: number;
-  last_upload_time: string | null;
-  last_upload_event: string | null;
 }
 
 interface UploadSuccessEvent {
@@ -91,8 +89,6 @@ interface GetStatusResult {
   journal_path_source: string | null;
   success_count: number;
   fail_count: number;
-  last_upload_time: string | null;
-  last_upload_event: string | null;
   uploader_id: string;
   detailed_logging: boolean;
 }

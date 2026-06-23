@@ -30,7 +30,6 @@ const Content = (): JSX.Element => {
   const [journalPathSource, setJournalPathSource] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
-  const [lastUpload, setLastUpload] = useState<string | null>(null);
   const [uploaderId, setUploaderIdState] = useState<string>("");
   const [manualPathInput, setManualPathInput] = useState<string>("");
   const [uploaderIdInput, setUploaderIdInput] = useState<string>("");
@@ -39,7 +38,6 @@ const Content = (): JSX.Element => {
   const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticsResult | null>(null);
   const [recentErrors, setRecentErrors] = useState<ActivityEntry[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
-  const [lastUploadEvent, setLastUploadEvent] = useState<string | null>(null);
 
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
@@ -57,8 +55,6 @@ const Content = (): JSX.Element => {
         setJournalPathSource(status.journal_path_source);
         setSuccessCount(status.success_count);
         setFailCount(status.fail_count);
-        setLastUpload(status.last_upload_time);
-        setLastUploadEvent(status.last_upload_event);
         const uid = status.uploader_id;
         setUploaderIdState(uid);
         setUploaderIdInput(uid);
@@ -76,8 +72,6 @@ const Content = (): JSX.Element => {
     const statusListener = addEventListener("status_update", (data: StatusUpdateEvent): void => {
       setSuccessCount(data.success_count);
       setFailCount(data.fail_count);
-      setLastUpload(data.last_upload_time);
-      setLastUploadEvent(data.last_upload_event);
     });
 
     const edStateListener = addEventListener("ed_state_change", (data: EdStateChangeEvent): void => {
@@ -86,7 +80,6 @@ const Content = (): JSX.Element => {
 
     const successListener = addEventListener("upload_success", (data: UploadSuccessEvent): void => {
       setSuccessCount(data.total_success);
-      setLastUploadEvent(data.event_name);
     });
 
     const failListener = addEventListener("upload_failed", (data: UploadFailedEvent): void => {
@@ -201,7 +194,7 @@ const Content = (): JSX.Element => {
 
   const getJournalStatusText = (): string => {
     if (!journalPath) return "🔍 Not Found";
-    if (watcherRunning) return "🟢 Watching & Uploading";
+    if (watcherRunning) return "🟢 Watching";
     // Journal path found but not watching
     return edRunning ? "⚠️ Found, Not Watching" : "📂 Found";
   };
@@ -236,22 +229,6 @@ const Content = (): JSX.Element => {
             ✅ {successCount} ❌ {failCount}
           </Field>
         </PanelSectionRow>
-        {lastUpload && (
-          <PanelSectionRow>
-            <Field label="Last Upload">
-              {lastUploadEvent
-                ? `${lastUploadEvent} — ${new Date(lastUpload).toLocaleTimeString()}`
-                : new Date(lastUpload).toLocaleTimeString()}
-            </Field>
-          </PanelSectionRow>
-        )}
-        {!lastUpload && (
-          <PanelSectionRow>
-            <Field label="Last Upload">
-              No uploads yet
-            </Field>
-          </PanelSectionRow>
-        )}
       </PanelSection>
 
       <PanelSection title="Recent Activity">
