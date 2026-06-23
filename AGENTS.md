@@ -29,7 +29,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Keep this file (AGENTS.md) up-to-date after implementing any change
 - After implementing any change, update `README.md` if user-facing behavior, features, or supported events have changed
 - After implementing any change, add an entry under `[Unreleased]` in `CHANGELOG.md`
-- When tagging a new release, update `CHANGELOG.md`: move `[Unreleased]` entries under the new version header with the release date, and add a fresh `[Unreleased]` section
+- When tagging a new release, use `bash scripts/release.sh <version>` (e.g. `bash scripts/release.sh 0.3.0`): it bumps `package.json`, prompts for the `CHANGELOG.md` update (move `[Unreleased]` entries under the new version header with the release date, add a fresh `[Unreleased]` section), commits both, and creates the tag. Never create a tag before bumping `package.json` — Decky displays the version from `package.json`
 
 ## Reporting
 - All report and review output (code reviews, diagnostics, analysis, etc.) must be written to the `./reports/` folder
