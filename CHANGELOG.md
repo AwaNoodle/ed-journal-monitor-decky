@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-23
+
+### Changed
+
+- Removed the **Last Upload** row from the status panel — upload events are already visible in the Recent Activity section
+- Journal Status active state simplified from "🟢 Watching & Uploading" to "🟢 Watching"
+
 ## [0.2.1] - 2026-06-22
 
 ### Added
