@@ -1,6 +1,6 @@
 {
   "name": "ed-journal-monitor-decky",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Decky plugin that monitors Elite Dangerous journal files and submits events to EDDN",
   "type": "module",
   "scripts": {

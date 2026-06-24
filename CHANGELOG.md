@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-25
+
 ### Added
 
 - EDDN submission for four new journal-sourced schemas: `ScanBaryCentre` (scanbarycentre/1), `FSSBodySignals` (fssbodysignals/1), `DockingGranted` (dockinggranted/1), and `DockingDenied` (dockingdenied/1). Journal-sourced EDDN coverage is now complete (16/16 applicable schemas).
