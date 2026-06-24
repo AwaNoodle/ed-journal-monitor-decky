@@ -12,15 +12,19 @@ from src.modules.constants import (
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
     EDDN_DISALLOWED_FIELDS,
+    EDDN_DOCKINGDENIED_1_SCHEMA_REF,
+    EDDN_DOCKINGGRANTED_1_SCHEMA_REF,
     EDDN_FACTIONS_DISALLOWED_FIELDS,
     EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
     EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
+    EDDN_FSSBODYSIGNALS_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
     EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
+    EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
     JOURNAL_1_ONLY_DISALLOWED,
 )
@@ -46,6 +50,10 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "CodexEntry": ["timestamp", "SystemAddress", "Name", "Region", "EntryID", "BodyID", "BodyName"],
     "NavBeaconScan": ["timestamp", "NumBodies"],
     "FSSAllBodiesFound": ["timestamp", "SystemName", "SystemAddress", "Count"],
+    "ScanBaryCentre": ["timestamp", "SystemAddress", "BodyID"],
+    "FSSBodySignals": ["timestamp", "BodyName", "BodyID", "SystemAddress", "Signals"],
+    "DockingGranted": ["timestamp", "MarketID", "StationName"],
+    "DockingDenied": ["timestamp", "MarketID", "StationName", "Reason"],
 }
 
 
@@ -107,6 +115,10 @@ class EDDNValidator:
     # Events that natively contain StarPos in the journal
     _STARPOS_EVENTS: ClassVar[set[str]] = {"FSDJump", "Location", "CarrierJump"}
 
+    # Station-context events whose EDDN schemas do not include StarPos and so
+    # must not require it (e.g. dockinggranted/1, dockingdenied/1).
+    _NO_STARPOS_EVENTS: ClassVar[set[str]] = {"DockingGranted", "DockingDenied"}
+
     def validate(self, event: ParsedEvent, session_state: SessionState | None = None) -> bool:  # noqa: PLR0911
         """
         Validate that an event has all required fields for its type.
@@ -133,8 +145,13 @@ class EDDNValidator:
             return False
 
         # EDDN requires StarPos on most messages.
-        # Events that natively have StarPos are fine. Others need augmentation.
-        if event.event_type not in self._STARPOS_EVENTS and "StarPos" not in event.raw:
+        # Events that natively have StarPos are fine. Station-context events
+        # (docking) never carry StarPos. Others need augmentation.
+        if (
+            event.event_type not in self._STARPOS_EVENTS
+            and event.event_type not in self._NO_STARPOS_EVENTS
+            and "StarPos" not in event.raw
+        ):
             if not session_state or not session_state.star_pos:
                 return False
             # Check SystemAddress matches cached position
@@ -614,6 +631,126 @@ class EDDNValidator:
 
         return {
             "$schemaRef": EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
+        }
+
+    def transform_scan_bary_centre(
+        self, event: ParsedEvent, session_state: SessionState
+    ) -> dict | None:
+        """Transform a ScanBaryCentre event into a scanbarycentre/1 message.
+
+        Strips disallowed/_Localised fields, augments StarSystem and StarPos
+        from session state (StarPos is not present in the journal event), and
+        injects horizons/odyssey. Returns None when StarPos cannot be supplied,
+        since it is required by the schema.
+        """
+        message_payload = _strip_disallowed(event.raw)
+
+        for field in JOURNAL_1_ONLY_DISALLOWED:
+            message_payload.pop(field, None)
+
+        # Augment StarPos/StarSystem from session state, gated by SystemAddress
+        event_sys = message_payload.get("SystemAddress")
+        if event_sys is None or event_sys == session_state.system_address:
+            if "StarPos" not in message_payload and session_state.star_pos:
+                message_payload["StarPos"] = session_state.star_pos
+            if not message_payload.get("StarSystem") and session_state.star_system:
+                message_payload["StarSystem"] = session_state.star_system
+
+        # StarPos is required by scanbarycentre/1
+        if "StarPos" not in message_payload:
+            return None
+
+        message_payload["horizons"] = session_state.horizons
+        message_payload["odyssey"] = session_state.odyssey
+
+        return {
+            "$schemaRef": EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
+        }
+
+    def transform_fss_body_signals(
+        self, event: ParsedEvent, session_state: SessionState
+    ) -> dict | None:
+        """Transform an FSSBodySignals event into an fssbodysignals/1 message.
+
+        Strips disallowed fields and _Localised keys (including Type_Localised
+        nested inside Signals[]), augments StarSystem and StarPos from session
+        state (neither is present in the journal event), and injects
+        horizons/odyssey. Returns None when StarSystem/StarPos cannot be
+        supplied, since both are required by the schema.
+        """
+        message_payload = _strip_disallowed(event.raw)
+
+        for field in JOURNAL_1_ONLY_DISALLOWED:
+            message_payload.pop(field, None)
+
+        # Augment StarPos/StarSystem from session state, gated by SystemAddress
+        event_sys = message_payload.get("SystemAddress")
+        if event_sys is None or event_sys == session_state.system_address:
+            if "StarPos" not in message_payload and session_state.star_pos:
+                message_payload["StarPos"] = session_state.star_pos
+            if not message_payload.get("StarSystem") and session_state.star_system:
+                message_payload["StarSystem"] = session_state.star_system
+
+        # StarSystem and StarPos are required by fssbodysignals/1
+        if "StarPos" not in message_payload or not message_payload.get("StarSystem"):
+            return None
+
+        message_payload["horizons"] = session_state.horizons
+        message_payload["odyssey"] = session_state.odyssey
+
+        return {
+            "$schemaRef": EDDN_FSSBODYSIGNALS_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
+        }
+
+    def transform_docking_granted(
+        self, event: ParsedEvent, session_state: SessionState
+    ) -> dict:
+        """Transform a DockingGranted event into a dockinggranted/1 message.
+
+        Station-context schema: passes through LandingPad, MarketID,
+        StationName, StationType (no StarPos/StarSystem augmentation), strips
+        disallowed/_Localised fields, and injects horizons/odyssey.
+        """
+        message_payload = _strip_disallowed(event.raw)
+
+        for field in JOURNAL_1_ONLY_DISALLOWED:
+            message_payload.pop(field, None)
+
+        message_payload["horizons"] = session_state.horizons
+        message_payload["odyssey"] = session_state.odyssey
+
+        return {
+            "$schemaRef": EDDN_DOCKINGGRANTED_1_SCHEMA_REF,
+            "header": {},
+            "message": message_payload,
+        }
+
+    def transform_docking_denied(
+        self, event: ParsedEvent, session_state: SessionState
+    ) -> dict:
+        """Transform a DockingDenied event into a dockingdenied/1 message.
+
+        Station-context schema: passes through Reason, MarketID, StationName,
+        StationType (no StarPos/StarSystem augmentation), strips
+        disallowed/_Localised fields (including Reason_Localised), and injects
+        horizons/odyssey.
+        """
+        message_payload = _strip_disallowed(event.raw)
+
+        for field in JOURNAL_1_ONLY_DISALLOWED:
+            message_payload.pop(field, None)
+
+        message_payload["horizons"] = session_state.horizons
+        message_payload["odyssey"] = session_state.odyssey
+
+        return {
+            "$schemaRef": EDDN_DOCKINGDENIED_1_SCHEMA_REF,
             "header": {},
             "message": message_payload,
         }

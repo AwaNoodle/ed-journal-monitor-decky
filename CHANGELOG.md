@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- EDDN submission for four new journal-sourced schemas: `ScanBaryCentre` (scanbarycentre/1), `FSSBodySignals` (fssbodysignals/1), `DockingGranted` (dockinggranted/1), and `DockingDenied` (dockingdenied/1). Journal-sourced EDDN coverage is now complete (16/16 applicable schemas).
+
+### Documentation
+
+- README EDDN coverage tables reconciled with code: added the previously-undocumented `FCMaterials` (fcmaterials_journal/1) row and the four new schema rows
+- Documented that black-market data is not submittable from a journal-only source: `blackmarket/1` is deprecated and the `commodity/3` `prohibited`/`economies` arrays are CAPI-only (the commodity schema forbids sending them from journal `Market.json`)
+
 ## [0.2.2] - 2026-06-23
 
 ### Changed

@@ -19,6 +19,10 @@ EDDN_CODEXENTRY_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/codexentry/1"
 EDDN_NAVBEACONSCAN_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/navbeaconscan/1"
 EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fcmaterials_journal/1"
 EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fssallbodiesfound/1"
+EDDN_SCANBARYCENTRE_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/scanbarycentre/1"
+EDDN_FSSBODYSIGNALS_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/fssbodysignals/1"
+EDDN_DOCKINGGRANTED_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/dockinggranted/1"
+EDDN_DOCKINGDENIED_1_SCHEMA_REF = "https://eddn.edcd.io/schemas/dockingdenied/1"
 
 # Events that should be reported to EDDN
 REPORTABLE_EVENTS = {
@@ -39,6 +43,10 @@ REPORTABLE_EVENTS = {
     "NavBeaconScan",
     "FCMaterials",
     "FSSAllBodiesFound",
+    "ScanBaryCentre",
+    "FSSBodySignals",
+    "DockingGranted",
+    "DockingDenied",
 }
 
 # Journal events that require auxiliary JSON files.
@@ -67,6 +75,10 @@ DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {
     "CodexEntry": {"schema": "codexentry", "schema_ref": EDDN_CODEXENTRY_1_SCHEMA_REF},
     "NavBeaconScan": {"schema": "navbeaconscan", "schema_ref": EDDN_NAVBEACONSCAN_1_SCHEMA_REF},
     "FSSAllBodiesFound": {"schema": "fssallbodiesfound", "schema_ref": EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF},
+    "ScanBaryCentre": {"schema": "scanbarycentre", "schema_ref": EDDN_SCANBARYCENTRE_1_SCHEMA_REF},
+    "FSSBodySignals": {"schema": "fssbodysignals", "schema_ref": EDDN_FSSBODYSIGNALS_1_SCHEMA_REF},
+    "DockingGranted": {"schema": "dockinggranted", "schema_ref": EDDN_DOCKINGGRANTED_1_SCHEMA_REF},
+    "DockingDenied": {"schema": "dockingdenied", "schema_ref": EDDN_DOCKINGDENIED_1_SCHEMA_REF},
 }
 
 # Fields that EDDN disallows per journal/1 schema - must be stripped before submission

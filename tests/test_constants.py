@@ -8,13 +8,17 @@ from src.modules.constants import (
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
     EDDN_DISALLOWED_FIELDS,
+    EDDN_DOCKINGDENIED_1_SCHEMA_REF,
+    EDDN_DOCKINGGRANTED_1_SCHEMA_REF,
     EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
+    EDDN_FSSBODYSIGNALS_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
     EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
+    EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
     FSS_SIGNAL_DISALLOWED_FIELDS,
     JOURNAL_1_ONLY_DISALLOWED,
@@ -127,6 +131,18 @@ class TestSchemaReferences:
     def test_fcmaterials_journal1_schema_ref(self):
         assert EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/fcmaterials_journal/1"
 
+    def test_scanbarycentre1_schema_ref(self):
+        assert EDDN_SCANBARYCENTRE_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/scanbarycentre/1"
+
+    def test_fssbodysignals1_schema_ref(self):
+        assert EDDN_FSSBODYSIGNALS_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/fssbodysignals/1"
+
+    def test_dockinggranted1_schema_ref(self):
+        assert EDDN_DOCKINGGRANTED_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/dockinggranted/1"
+
+    def test_dockingdenied1_schema_ref(self):
+        assert EDDN_DOCKINGDENIED_1_SCHEMA_REF == "https://eddn.edcd.io/schemas/dockingdenied/1"
+
 
 class TestDisallowedFields:
     def test_latitude_not_in_global_disallowed(self):
@@ -220,5 +236,25 @@ class TestDedicatedSchemaEvents:
         assert entry["schema"] == "navbeaconscan"
         assert entry["schema_ref"] == EDDN_NAVBEACONSCAN_1_SCHEMA_REF
 
-    def test_only_six_dedicated_events(self):
-        assert len(DEDICATED_SCHEMA_EVENTS) == 6
+    def test_scanbarycentre_schema(self):
+        entry = DEDICATED_SCHEMA_EVENTS["ScanBaryCentre"]
+        assert entry["schema"] == "scanbarycentre"
+        assert entry["schema_ref"] == EDDN_SCANBARYCENTRE_1_SCHEMA_REF
+
+    def test_fssbodysignals_schema(self):
+        entry = DEDICATED_SCHEMA_EVENTS["FSSBodySignals"]
+        assert entry["schema"] == "fssbodysignals"
+        assert entry["schema_ref"] == EDDN_FSSBODYSIGNALS_1_SCHEMA_REF
+
+    def test_dockinggranted_schema(self):
+        entry = DEDICATED_SCHEMA_EVENTS["DockingGranted"]
+        assert entry["schema"] == "dockinggranted"
+        assert entry["schema_ref"] == EDDN_DOCKINGGRANTED_1_SCHEMA_REF
+
+    def test_dockingdenied_schema(self):
+        entry = DEDICATED_SCHEMA_EVENTS["DockingDenied"]
+        assert entry["schema"] == "dockingdenied"
+        assert entry["schema_ref"] == EDDN_DOCKINGDENIED_1_SCHEMA_REF
+
+    def test_dedicated_event_count(self):
+        assert len(DEDICATED_SCHEMA_EVENTS) == 10

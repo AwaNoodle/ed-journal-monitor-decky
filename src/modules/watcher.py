@@ -260,6 +260,10 @@ class JournalWatcher:
             "CodexEntry": self.validator.transform_codex_entry,
             "NavBeaconScan": self.validator.transform_navbeacon_scan,
             "FSSAllBodiesFound": self.validator.transform_fss_all_bodies_found,
+            "ScanBaryCentre": self.validator.transform_scan_bary_centre,
+            "FSSBodySignals": self.validator.transform_fss_body_signals,
+            "DockingGranted": self.validator.transform_docking_granted,
+            "DockingDenied": self.validator.transform_docking_denied,
         }
         transformer = transform_dispatch.get(event_type)
         if transformer is None:

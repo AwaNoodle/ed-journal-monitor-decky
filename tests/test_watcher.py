@@ -13,13 +13,17 @@ from src.modules.constants import (
     EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
     EDDN_CODEXENTRY_1_SCHEMA_REF,
     EDDN_COMMODITY_3_SCHEMA_REF,
+    EDDN_DOCKINGDENIED_1_SCHEMA_REF,
+    EDDN_DOCKINGGRANTED_1_SCHEMA_REF,
     EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
+    EDDN_FSSBODYSIGNALS_1_SCHEMA_REF,
     EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
     EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
     EDDN_JOURNAL_1_SCHEMA_REF,
     EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
+    EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
 )
 from src.modules.parser import JournalParser
@@ -575,6 +579,43 @@ class TestDedicatedSchemaRouting:
         assert "FSSSignalDiscovered" in event_names
         # Event name for FSSDiscoveryScan should be FSSDiscoveryScan
         assert "FSSDiscoveryScan" in event_names
+
+    @pytest.mark.asyncio
+    async def test_new_coverage_events_route_to_dedicated_schemas(self, watcher, tmp_path):
+        """ScanBaryCentre, FSSBodySignals, DockingGranted and DockingDenied
+        should each route through the dedicated schema path and submit."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T12:06:00Z","event":"ScanBaryCentre","StarSystem":"Sol","SystemAddress":10477373803,"BodyID":2,"SemiMajorAxis":1.23}\n'
+            '{"timestamp":"2026-01-12T12:07:00Z","event":"FSSBodySignals","BodyName":"Earth","BodyID":2,"SystemAddress":10477373803,"Signals":[{"Type":"$SAA_SignalType_Geological;","Type_Localised":"Geological","Count":3}]}\n'
+            '{"timestamp":"2026-01-12T12:08:00Z","event":"DockingGranted","LandingPad":7,"MarketID":128666762,"StationName":"Galileo","StationType":"Coriolis"}\n'
+            '{"timestamp":"2026-01-12T12:09:00Z","event":"DockingDenied","Reason":"Distance","Reason_Localised":"TooFarAway","MarketID":128666762,"StationName":"Galileo","StationType":"Coriolis"}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        by_event = {
+            call.kwargs.get("event_name"): call.args[0]
+            for call in watcher.submitter.submit.await_args_list
+            if call.kwargs.get("event_name")
+        }
+        assert by_event["ScanBaryCentre"]["$schemaRef"] == EDDN_SCANBARYCENTRE_1_SCHEMA_REF
+        assert by_event["FSSBodySignals"]["$schemaRef"] == EDDN_FSSBODYSIGNALS_1_SCHEMA_REF
+        assert by_event["DockingGranted"]["$schemaRef"] == EDDN_DOCKINGGRANTED_1_SCHEMA_REF
+        assert by_event["DockingDenied"]["$schemaRef"] == EDDN_DOCKINGDENIED_1_SCHEMA_REF
+        # StarPos augmented onto ScanBaryCentre/FSSBodySignals from the FSDJump
+        assert by_event["ScanBaryCentre"]["message"]["StarPos"] == [0, 0, 0]
+        assert by_event["FSSBodySignals"]["message"]["StarSystem"] == "Sol"
+        # Nested _Localised stripped
+        assert "Type_Localised" not in by_event["FSSBodySignals"]["message"]["Signals"][0]
+        # Docking events carry no StarPos
+        assert "StarPos" not in by_event["DockingGranted"]["message"]
 
     @pytest.mark.asyncio
     async def test_approach_settlement_uses_dedicated_schema(self, watcher, tmp_path):
