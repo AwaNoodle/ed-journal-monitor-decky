@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (429 tests, all passing)
+- Tests: pytest + pytest-asyncio (460 tests, all passing)
 - Known on-device issue: Decky Loader's PyInstaller-embedded Python 3.11 can't find system SSL certs; submitter uses `_build_ssl_context()` with explicit CA bundle cascade (env → certifi → system paths)
 
 ## Architecture
@@ -17,10 +17,13 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - No root flag needed
 
 ### Backend Callable Methods (frontend→backend)
-`get_status`, `start_watcher`, `stop_watcher`, `find_journal_path`, `set_journal_path`, `set_enabled`, `set_uploader_id`, `set_detailed_logging`, `set_ed_running`, `check_ed_running`, `create_diagnostics`, `get_recent_activity`
+`get_status`, `start_watcher`, `stop_watcher`, `find_journal_path`, `set_journal_path`, `set_enabled`, `set_uploader_id`, `set_detailed_logging`, `set_ed_running`, `check_ed_running`, `create_diagnostics`, `get_recent_activity`, `get_session_stats`
 
 ### Backend-Emitted Events (backend→frontend)
-`ed_state_change`, `upload_success`, `upload_failed`, `status_update`, `activity_update`, `commander_detected`
+`ed_state_change`, `upload_success`, `upload_failed`, `status_update`, `activity_update`, `commander_detected`, `session_update`
+
+### Stream Consumers
+The watcher fans every parsed event out to a `list[StreamConsumer]` (`src/modules/stream_consumer.py`) — a thin `observe(event, session_state)` protocol — **before** the EDDN reportable filter, in parallel to (never gating) EDDN routing. The session-stats accumulator (`session_stats`) is consumer #1; this is the seam a future EDSM forwarder will append to.
 
 ## Coding Rules
 - Always write tests before (or alongside) implementing a change — prefer delegating test creation to a subagent or specialized agent when available
@@ -41,8 +44,8 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 
 ## Key Files
 - `main.py` — Plugin entry point, wires all backend modules
-- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics, activity_log, constants, signal_batcher)
-- `src/api.ts` — Defines all 12 callable frontend→backend methods
+- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics, activity_log, constants, signal_batcher, session_stats, stream_consumer)
+- `src/api.ts` — Defines all 13 callable frontend→backend methods
 - `src/types.d.ts` — TypeScript type definitions for callable results and emitted event payloads
 - `src/index.tsx` — Frontend: game lifecycle + plugin registration
 - `src/Content.tsx` — Frontend: UI panel (status, configuration, recent errors, recent activity, diagnostics)

@@ -103,3 +103,14 @@ interface DiagnosticsResult {
 interface EdStateChangeEvent {
   ed_running: boolean;
 }
+
+interface SessionStats {
+  commander: string;
+  star_system: string;
+  jumps: number;
+  distance_ly: number;
+  bodies_scanned: number;
+  first_discoveries: number;
+}
+
+type SessionUpdateEvent = SessionStats;

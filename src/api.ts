@@ -12,3 +12,4 @@ export const setEdRunning = callable<[boolean], BasicSuccessResult>("set_ed_runn
 export const checkEdRunning = callable<[], { running: boolean; reason?: string }>("check_ed_running");
 export const createDiagnosticsBundle = callable<[], DiagnosticsResult>("create_diagnostics");
 export const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("get_recent_activity");
+export const getSessionStats = callable<[], SessionStats>("get_session_stats");

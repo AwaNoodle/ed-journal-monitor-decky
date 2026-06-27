@@ -7,6 +7,7 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 ## Features
 
+- **Live session dashboard**: A glanceable summary of your current ED game launch — current system, jumps, distance travelled, bodies scanned, and first discoveries — updated live at the top of the panel
 - **Hands-off operation**: Automatically detects when Elite Dangerous starts and stops, beginning/ending journal monitoring accordingly
 - **Auto-discovery**: Finds the ED journal directory by scanning Steam's library configuration — no manual setup required for Steam installs
 - **EDDN submission**: Validates and submits journal/1 events plus Market/Outfitting/Shipyard auxiliary schemas to EDDN
@@ -39,8 +40,9 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 ## UI Panel
 
-The Decky plugin panel has five sections:
+The Decky plugin panel has six sections:
 
+- **Session**: A live, player-facing summary of the current ED game launch — a hero location line (current system) above a 2×2 grid of counters (jumps, distance in ly, bodies scanned, first discoveries). Resets on each game launch (and when the active commander changes); shows a neutral empty state before any events are seen.
 - **Status**: Enabled toggle, ED status (running/not running), Journal status (watching/found/not found), upload counts (✅ success / ❌ failed), last upload event & time
 - **Configuration**: Journal path display, path source (auto/manual), re-scan button, manual journal path input, EDDN uploader ID input, notification when no uploader ID is set
 - **Recent Errors**: Last 5 failed uploads with event type, timestamp, error classification, error message, and HTTP status

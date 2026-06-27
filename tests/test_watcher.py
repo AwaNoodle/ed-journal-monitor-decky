@@ -49,6 +49,112 @@ def watcher():
     )
 
 
+class RecordingConsumer:
+    """A fake StreamConsumer that records every event it observes."""
+
+    def __init__(self):
+        self.observed = []
+
+    def observe(self, event, session_state):
+        self.observed.append(event.event_type)
+
+
+class TestStreamConsumerFanout:
+    """Every registered consumer observes every parsed event before is_reportable."""
+
+    @pytest.mark.asyncio
+    async def test_all_consumers_observe_every_parsed_event(self, watcher, tmp_path):
+        consumer_a = RecordingConsumer()
+        consumer_b = RecordingConsumer()
+        watcher._consumers = [consumer_a, consumer_b]
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":15,"FuelUsed":2.3,"FuelLevel":28.6}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # Fan-out reaches every consumer for every parsed event, including
+        # non-reportable ones like LoadGame (proves it runs before is_reportable).
+        expected = ["Fileheader", "LoadGame", "FSDJump"]
+        assert consumer_a.observed == expected
+        assert consumer_b.observed == expected
+
+    @pytest.mark.asyncio
+    async def test_eddn_submission_unaffected_by_consumers(self, watcher, tmp_path):
+        watcher._consumers = [RecordingConsumer()]
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":15,"FuelUsed":2.3,"FuelLevel":28.6}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # The reportable FSDJump is still validated and submitted, unchanged.
+        watcher.submitter.submit.assert_awaited_once()
+        message = watcher.submitter.submit.await_args.args[0]
+        assert message["$schemaRef"] == EDDN_JOURNAL_1_SCHEMA_REF
+        assert message["message"]["event"] == "FSDJump"
+
+    @pytest.mark.asyncio
+    async def test_consumer_exception_does_not_block_eddn_or_other_consumers(self, watcher, tmp_path):
+        class BoomConsumer:
+            def observe(self, event, session_state):
+                raise RuntimeError("boom")
+
+        good = RecordingConsumer()
+        watcher._consumers = [BoomConsumer(), good]
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":15,"FuelUsed":2.3,"FuelLevel":28.6}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        # A misbehaving consumer must not block other consumers or EDDN routing.
+        assert good.observed == ["FSDJump"]
+        watcher.submitter.submit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_initial_scan_coalesces_consumer_emits(self, watcher, tmp_path):
+        from src.modules.session_stats import SessionStatsAccumulator
+
+        seen = []
+        accumulator = SessionStatsAccumulator(on_change=seen.append)
+        watcher._consumers = [accumulator]
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        watcher._journal_path = str(tmp_path)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1,"StarPos":[0,0,0],"JumpDist":15}\n'
+            '{"timestamp":"2026-01-12T12:06:30Z","event":"FSDJump","StarSystem":"Wolf 359","JumpDist":7.8}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._initial_scan(last_active=None)
+
+        # Replay touches several stats events but settles into one emit.
+        assert len(seen) == 1
+        assert seen[-1]["jumps"] == 2
+        assert seen[-1]["star_system"] == "Wolf 359"
+
+
 class TestFilePositions:
     """Tests for file position tracking."""
 

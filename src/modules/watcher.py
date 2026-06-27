@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from src.modules.parser import JournalParser, ParsedEvent
     from src.modules.settings import PluginSettings
     from src.modules.signal_batcher import SignalBatcher
+    from src.modules.stream_consumer import StreamConsumer
     from src.modules.submitter import EDDNSubmitter
     from src.modules.validator import EDDNValidator
 
@@ -34,12 +35,15 @@ class JournalWatcher:
         validator: EDDNValidator,
         submitter: EDDNSubmitter,
         signal_batcher: SignalBatcher | None = None,
+        consumers: list[StreamConsumer] | None = None,
     ) -> None:
         self.settings = settings
         self.parser = parser
         self.validator = validator
         self.submitter = submitter
         self._signal_batcher = signal_batcher or self._create_batcher()
+        # Stream consumers observe every parsed event before EDDN routing.
+        self._consumers: list[StreamConsumer] = consumers or []
         self.is_running = False
 
         self._journal_path: str | None = None
@@ -107,6 +111,16 @@ class JournalWatcher:
         if not log_files:
             return
 
+        # Coalesce consumer emits during the replay burst so the panel sees
+        # one settled value instead of flickering through every replayed event.
+        self._suspend_consumers()
+        try:
+            await self._replay_initial_scan(log_files, last_active)
+        finally:
+            self._resume_consumers()
+
+    async def _replay_initial_scan(self, log_files: list[Path], last_active: str | None) -> None:
+        """Replay journal files on watcher start (see _initial_scan)."""
         for log_file in log_files:
             if last_active:
                 # Catch-up: process files modified after last-active timestamp
@@ -199,6 +213,12 @@ class JournalWatcher:
                 if not event:
                     continue
 
+                # Fan every parsed event out to stream consumers (session
+                # stats, future EDSM forwarder) BEFORE the EDDN reportable
+                # filter, so they see non-reportable events (e.g. LoadGame)
+                # and never gate or alter EDDN routing.
+                self._fan_out(event)
+
                 # Auto-detect commander name from LoadGame for uploader ID
                 if event.event_type == "LoadGame" and self.parser.session_state.commander:
                     await decky.emit("commander_detected", {"commander": self.parser.session_state.commander})
@@ -209,6 +229,32 @@ class JournalWatcher:
                 # Per-event isolation: one bad event must not prevent
                 # processing of subsequent events in the same file.
                 decky.logger.error(f"Error processing event in {filepath}: {e}")
+
+    def _suspend_consumers(self) -> None:
+        """Pause emit on consumers that support coalescing (e.g. session stats)."""
+        for consumer in self._consumers:
+            suspend = getattr(consumer, "suspend", None)
+            if callable(suspend):
+                suspend()
+
+    def _resume_consumers(self) -> None:
+        """Resume consumers, flushing a single settled emit each."""
+        for consumer in self._consumers:
+            resume = getattr(consumer, "resume", None)
+            if callable(resume):
+                resume()
+
+    def _fan_out(self, event: ParsedEvent) -> None:
+        """Deliver a parsed event to every registered stream consumer.
+
+        Per-consumer isolation: a misbehaving consumer must not block other
+        consumers or the EDDN submission path.
+        """
+        for consumer in self._consumers:
+            try:
+                consumer.observe(event, self.parser.session_state)
+            except Exception as e:
+                decky.logger.error(f"Stream consumer error on {event.event_type}: {e}")
 
     async def _process_reportable_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
         """Validate and submit a reportable event with schema-aware routing."""

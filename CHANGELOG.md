@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Session dashboard**: a live, player-facing summary of the current ED game launch shown at the top of the panel — current system, jumps, distance travelled (ly), bodies scanned, and first discoveries. Stats accumulate from the journal event stream in parallel to EDDN submission, reset on each game launch (and on commander change), and update live via a new `session_update` backend event with a `get_session_stats` rehydrate callable.
+
+### Internal
+
+- Introduced a `StreamConsumer` fan-out seam in the watcher: every parsed event is delivered to registered consumers before the EDDN reportable filter, with the session-stats accumulator (`src/modules/session_stats.py`) as the first consumer. This is the same raw-event tap a future EDSM forwarder will use, so adding it is purely additive.
+
 ## [0.3.0] - 2026-06-25
 
 ### Added

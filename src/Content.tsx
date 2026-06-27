@@ -13,6 +13,7 @@ import {
   createDiagnosticsBundle,
   findJournalPath,
   getRecentActivity,
+  getSessionStats,
   getStatus,
   setDetailedLogging,
   setEnabled,
@@ -38,6 +39,7 @@ const Content = (): JSX.Element => {
   const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticsResult | null>(null);
   const [recentErrors, setRecentErrors] = useState<ActivityEntry[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
 
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
@@ -65,6 +67,16 @@ const Content = (): JSX.Element => {
       }
     };
     void loadStatus();
+
+    // Rehydrate session stats so the panel shows the current launch immediately.
+    const loadSessionStats = async (): Promise<void> => {
+      try {
+        setSessionStats(await getSessionStats());
+      } catch (e) {
+        console.error("Failed to load session stats", e);
+      }
+    };
+    void loadSessionStats();
   }, []);
 
   // Listen for backend events
@@ -76,6 +88,10 @@ const Content = (): JSX.Element => {
 
     const edStateListener = addEventListener("ed_state_change", (data: EdStateChangeEvent): void => {
       setEdRunning(data.ed_running);
+    });
+
+    const sessionListener = addEventListener("session_update", (data: SessionUpdateEvent): void => {
+      setSessionStats(data);
     });
 
     const successListener = addEventListener("upload_success", (data: UploadSuccessEvent): void => {
@@ -129,6 +145,7 @@ const Content = (): JSX.Element => {
     return (): void => {
       removeEventListener("status_update", statusListener);
       removeEventListener("ed_state_change", edStateListener);
+      removeEventListener("session_update", sessionListener);
       removeEventListener("upload_success", successListener);
       removeEventListener("upload_failed", failListener);
       removeEventListener("activity_update", activityListener);
@@ -204,8 +221,60 @@ const Content = (): JSX.Element => {
     return `${entry.timestamp}-${entry.event_type}-${entry.outcome}-${status}`;
   };
 
+  const hasSessionData = (s: SessionStats | null): boolean => {
+    if (!s) return false;
+    return (
+      s.star_system !== "" ||
+      s.jumps > 0 ||
+      s.bodies_scanned > 0 ||
+      s.first_discoveries > 0 ||
+      s.distance_ly > 0
+    );
+  };
+
+  const renderCounter = (label: string, value: string): JSX.Element => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "1 1 45%", padding: "4px 0" }}>
+      <span style={{ fontSize: "20px", fontWeight: "bold", lineHeight: "1.1" }}>{value}</span>
+      <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</span>
+    </div>
+  );
+
+  const renderSession = (): JSX.Element => {
+    if (!hasSessionData(sessionStats) || !sessionStats) {
+      return (
+        <PanelSectionRow>
+          <Field>No session activity yet</Field>
+        </PanelSectionRow>
+      );
+    }
+    return (
+      <>
+        <PanelSectionRow>
+          <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Location</span>
+            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+              {sessionStats.star_system || "Unknown"}
+            </span>
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ display: "flex", flexWrap: "wrap", width: "100%" }}>
+            {renderCounter("Jumps", String(sessionStats.jumps))}
+            {renderCounter("Distance (ly)", sessionStats.distance_ly.toFixed(1))}
+            {renderCounter("Bodies Scanned", String(sessionStats.bodies_scanned))}
+            {renderCounter("First Discoveries", String(sessionStats.first_discoveries))}
+          </div>
+        </PanelSectionRow>
+      </>
+    );
+  };
+
   return (
     <div>
+      <PanelSection title="Session">
+        {renderSession()}
+      </PanelSection>
+
       <PanelSection title="Status">
         <PanelSectionRow>
           <ToggleField

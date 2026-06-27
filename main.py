@@ -5,6 +5,7 @@ Monitors Elite Dangerous journal files and submits events to EDDN.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -22,6 +23,7 @@ from src.modules.activity_log import ActivityLog  # noqa: E402
 from src.modules.diagnostics import create_diagnostics as _create_diagnostics  # noqa: E402
 from src.modules.parser import JournalParser  # noqa: E402
 from src.modules.path_finder import JournalPathFinder  # noqa: E402
+from src.modules.session_stats import SessionStats, SessionStatsAccumulator  # noqa: E402
 from src.modules.settings import PluginSettings  # noqa: E402
 from src.modules.signal_batcher import SignalBatcher  # noqa: E402
 from src.modules.submitter import EDDNSubmitter  # noqa: E402
@@ -37,8 +39,12 @@ class Plugin:
         self.validator: EDDNValidator | None = None
         self.activity_log: ActivityLog | None = None
         self.submitter: EDDNSubmitter | None = None
+        self.session_stats: SessionStatsAccumulator | None = None
         self.watcher: JournalWatcher | None = None
         self.ed_running: bool = False
+        # Strong references to in-flight emit tasks (asyncio keeps only weak
+        # references, so an unreferenced task can be GC'd mid-flight).
+        self._emit_tasks: set[asyncio.Task] = set()
 
     async def _main(self) -> None:
         decky.logger.info("ED Journal Monitor starting...")
@@ -64,6 +70,7 @@ class Plugin:
         self.validator = EDDNValidator()
         self.activity_log = ActivityLog()
         self.submitter = EDDNSubmitter(self.settings, activity_log=self.activity_log)
+        self.session_stats = SessionStatsAccumulator(on_change=self._on_session_stats_change)
         signal_batcher = SignalBatcher()
         self.watcher = JournalWatcher(
             settings=self.settings,
@@ -71,6 +78,7 @@ class Plugin:
             validator=self.validator,
             submitter=self.submitter,
             signal_batcher=signal_batcher,
+            consumers=[self.session_stats],
         )
 
         # Try to find journal path from cache or VDF scan
@@ -199,6 +207,11 @@ class Plugin:
         if enabled and self.submitter:
             self.submitter.reset_stats()
             await decky.emit("status_update", self.submitter.get_stats())
+        if enabled and self.session_stats:
+            # Reset session stats on the same launch epoch as upload stats.
+            # Runs before start_watcher's _initial_scan replay so the current
+            # launch's earlier events are recounted (retroactive totals).
+            self.session_stats.reset()
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 
@@ -229,3 +242,22 @@ class Plugin:
         if not self.activity_log:
             return []
         return self.activity_log.get_recent(limit=limit, outcome=outcome)
+
+    async def get_session_stats(self) -> dict:
+        """Get the current session stats for the active ED game launch."""
+        if not self.session_stats:
+            return SessionStats().__dict__.copy()
+        return self.session_stats.get_stats()
+
+    # --- internal helpers ---
+
+    def _on_session_stats_change(self, stats: dict) -> None:
+        """Emit a session_update to the frontend when session stats change."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running event loop (e.g. during teardown) — skip emit.
+            return
+        task = loop.create_task(decky.emit("session_update", stats))
+        self._emit_tasks.add(task)
+        task.add_done_callback(self._emit_tasks.discard)
