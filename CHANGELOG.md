@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-27
+
 ### Added
 
 - **Session dashboard**: a live, player-facing summary of the current ED game launch shown at the top of the panel — current system, jumps, distance travelled (ly), bodies scanned, and first discoveries. Stats accumulate from the journal event stream in parallel to EDDN submission, reset on each game launch (and on commander change), and update live via a new `session_update` backend event with a `get_session_stats` rehydrate callable.
