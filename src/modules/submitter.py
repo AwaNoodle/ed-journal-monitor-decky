@@ -7,22 +7,26 @@ Submits validated events to the EDDN API with retry logic.
 
 import asyncio as _asyncio
 import json
-import os
 import random
-import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decky
 
 if TYPE_CHECKING:
+    import ssl
+
     from src.modules.activity_log import ActivityLog
     from src.modules.settings import PluginSettings
 
 from src.modules import constants
+from src.modules.ssl_context import build_ssl_context
+
+# Re-exported for backwards compatibility: the SSL context builder now lives in
+# the shared ``ssl_context`` module and is reused by the EDSM forwarder.
+_build_ssl_context = build_ssl_context
 
 EDDN_URL = "https://eddn.edcd.io:4430/upload/"
 DEFAULT_TIMEOUT = 10  # seconds
@@ -33,59 +37,6 @@ HTTP_RATE_LIMITED = 429
 HTTP_CLIENT_ERROR_MIN = 400
 HTTP_SERVER_ERROR_MIN = 500
 
-# Known system CA bundle paths (Steam Deck / Arch Linux)
-_SYSTEM_CA_PATHS = [
-    "/etc/ssl/cert.pem",  # Arch/SteamOS (ca-certificates)
-    "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
-    "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/Fedora
-]
-
-
-def _build_ssl_context() -> ssl.SSLContext:
-    """
-    Build an SSL context with a CA bundle that works in PyInstaller environments.
-
-    Decky Loader embeds Python 3.11 via PyInstaller. The bundled Python's
-    default SSL context may not find system CA certificates because its
-    compiled-in cert paths don't match the host filesystem layout. This
-    causes [SSL: CERTIFICATE_VERIFY_FAILED] errors on every HTTPS request.
-
-    We fix this by explicitly loading a CA bundle from:
-    1. The SSL_CERT_FILE env var (if set)
-    2. certifi's bundle (if the package is available)
-    3. Known system CA bundle paths
-    4. Fallback to default context (will likely fail on Decky)
-    """
-    # 1. Honour explicit env override
-    env_cert = os.environ.get("SSL_CERT_FILE")
-    if env_cert and Path(env_cert).is_file():
-        ctx = ssl.create_default_context(cafile=env_cert)
-        decky.logger.info(f"SSL context using SSL_CERT_FILE: {env_cert}")
-        return ctx
-
-    # 2. Try certifi (bundled with Decky Loader's PyInstaller package)
-    try:
-        import certifi  # type: ignore[import-untyped]  # noqa: PLC0415
-
-        certifi_path = certifi.where()
-        if Path(certifi_path).is_file():
-            ctx = ssl.create_default_context(cafile=certifi_path)
-            decky.logger.info(f"SSL context using certifi bundle: {certifi_path}")
-            return ctx
-    except ImportError:
-        pass
-
-    # 3. Try known system paths
-    for ca_path in _SYSTEM_CA_PATHS:
-        if Path(ca_path).is_file():
-            ctx = ssl.create_default_context(cafile=ca_path)
-            decky.logger.info(f"SSL context using system CA bundle: {ca_path}")
-            return ctx
-
-    # 4. Fallback
-    decky.logger.warning("No CA bundle found; using default SSL context (may fail)")
-    return ssl.create_default_context()
-
 
 class EDDNSubmitter:
     """Submits EDDN messages with exponential backoff retry."""
@@ -93,7 +44,7 @@ class EDDNSubmitter:
     def __init__(self, settings: PluginSettings, activity_log: ActivityLog | None = None) -> None:
         self.settings = settings
         self.activity_log = activity_log
-        self._ssl_context: ssl.SSLContext = _build_ssl_context()
+        self._ssl_context: ssl.SSLContext = build_ssl_context()
         self._success_count: int = 0
         self._fail_count: int = 0
         self._last_error_message: str | None = None
@@ -173,10 +124,9 @@ class EDDNSubmitter:
             except Exception as e:
                 decky.logger.error(f"decky emit upload_failed error: {e}")
 
-        try:
-            await decky.emit("status_update", self.get_stats())
-        except Exception as e:
-            decky.logger.error(f"decky emit status_update error: {e}")
+        # The full per-target status_update snapshot is owned by main.py (which
+        # aggregates EDDN with every other target). The per-event upload_success
+        # /upload_failed emits above carry EDDN's running totals to the frontend.
         return success
 
     def _classify_error(self) -> str:

@@ -1,7 +1,5 @@
-## Purpose
+## MODIFIED Requirements
 
-Surface recent upload failures and activity to the user in the Decky panel.
-## Requirements
 ### Requirement: Display recent errors panel
 The frontend SHALL display a "Recent Errors" panel section showing the last 5 failed upload entries with details, including the target each failed upload was sent to. Failures from any target (EDDN and EDSM) SHALL appear.
 
@@ -39,15 +37,3 @@ The frontend SHALL display a "Recent Activity" panel section showing the last 10
 #### Scenario: New activity arrives
 - **WHEN** the backend emits an `activity_update` event
 - **THEN** the frontend SHALL add the entry to the activity feed (pushing out the oldest if more than 10)
-
-### Requirement: Enhance last upload display with event name
-The frontend SHALL display the event name alongside the last upload timestamp.
-
-#### Scenario: Last upload was a successful FSDJump
-- **WHEN** the last successful upload was a FSDJump event
-- **THEN** the "Last Upload" field SHALL show both the timestamp and the event name (e.g. "FSDJump — 14:32:05")
-
-#### Scenario: No uploads yet
-- **WHEN** no successful uploads have occurred
-- **THEN** the "Last Upload" field SHALL display "No uploads yet"
-

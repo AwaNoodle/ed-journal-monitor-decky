@@ -70,3 +70,9 @@ example-events/
 # Reports and review output
 reports/
 context.md
+
+# Local working docs (exploration notes, superpowers plans/specs) — not committed
+docs/
+
+# Stray runtime settings written to repo root (e.g. under pytest)
+/settings.json

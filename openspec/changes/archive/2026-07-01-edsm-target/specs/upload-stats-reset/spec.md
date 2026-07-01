@@ -1,7 +1,5 @@
-## Purpose
+## MODIFIED Requirements
 
-Reset per-session upload statistics for every submission target when Elite Dangerous starts a new game session.
-## Requirements
 ### Requirement: Reset upload statistics on Elite Dangerous start
 The backend SHALL reset all per-target upload statistics (each target's success count and fail count, plus last upload time and last upload event) when Elite Dangerous transitions from not running to running. The reset MUST cover every registered submission consumer, not only EDDN.
 
@@ -32,4 +30,3 @@ The backend SHALL reset all per-target upload statistics (each target's success 
 
 - **WHEN** upload statistics are reset on ED start
 - **THEN** the activity log entries SHALL remain unchanged
-

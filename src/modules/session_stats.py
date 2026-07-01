@@ -42,6 +42,12 @@ class SessionStatsAccumulator:
     watcher's initial-scan replay) into a single settled emit.
     """
 
+    #: Stable target key under which this consumer is addressed.
+    name = "session"
+    #: The session accumulator is not a network upload target, so it is excluded
+    #: from per-target upload-stats aggregation.
+    reports_upload_stats = False
+
     def __init__(self, on_change: Callable[[dict], None] | None = None) -> None:
         self.stats = SessionStats()
         self.on_change = on_change
@@ -73,6 +79,13 @@ class SessionStatsAccumulator:
         """Zero all counters (new game launch) and emit the reset state."""
         self.stats = SessionStats()
         self._notify()
+
+    def on_session_start(self) -> None:
+        """Lifecycle hook: a new ED session — reset running totals."""
+        self.reset()
+
+    def on_session_stop(self) -> None:
+        """Lifecycle hook: watcher stopped. Nothing to flush here."""
 
     def get_stats(self) -> dict:
         """Return a snapshot of the current stats as a plain dict."""

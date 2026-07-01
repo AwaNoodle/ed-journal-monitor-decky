@@ -32,6 +32,7 @@ class TestSetEdRunningResetsSessionStats:
         plugin.submitter = MagicMock()
         plugin.submitter.get_stats.return_value = {"success_count": 0, "fail_count": 0}
         plugin.session_stats = SessionStatsAccumulator()
+        plugin.consumers = [plugin.session_stats]
         # Pre-populate as if a previous launch had stats.
         plugin.session_stats.stats.jumps = 7
         plugin.session_stats.stats.star_system = "Old System"
@@ -77,6 +78,7 @@ class TestResetBeforeReplay:
         plugin = Plugin()
         plugin.submitter = submitter
         plugin.session_stats = accumulator
+        plugin.consumers = [accumulator]
         plugin.watcher = watcher
 
         lines = [

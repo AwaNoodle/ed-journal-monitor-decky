@@ -26,6 +26,7 @@ class TestSetEdRunning:
         """set_ed_running(true) updates state, resets stats, and emits events."""
         plugin = Plugin()
         plugin.submitter = MagicMock()
+        plugin.submitter.get_stats.return_value = {"success_count": 0, "fail_count": 0}
         emitted_events = []
 
         async def mock_emit(event, data):
@@ -38,7 +39,9 @@ class TestSetEdRunning:
         assert plugin.ed_running is True
         plugin.submitter.reset_stats.assert_called_once()
         assert len(emitted_events) == 2
-        assert emitted_events[0] == ("status_update", plugin.submitter.get_stats.return_value)
+        # status_update now carries a per-target map; EDDN is one target entry.
+        assert emitted_events[0][0] == "status_update"
+        assert emitted_events[0][1]["targets"]["eddn"] == {"success_count": 0, "fail_count": 0}
         assert emitted_events[1] == ("ed_state_change", {"ed_running": True})
 
     @pytest.mark.asyncio
@@ -141,8 +144,8 @@ class TestSetEdRunning:
             await plugin.set_ed_running(True)
 
         status_update = next(e for e in emitted_events if e[0] == "status_update")
-        assert status_update[1]["success_count"] == 0
-        assert status_update[1]["fail_count"] == 0
+        assert status_update[1]["targets"]["eddn"]["success_count"] == 0
+        assert status_update[1]["targets"]["eddn"]["fail_count"] == 0
         assert status_update[1]["last_upload_time"] is None
         assert status_update[1]["last_upload_event"] is None
 

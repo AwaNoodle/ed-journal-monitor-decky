@@ -16,6 +16,7 @@ import {
   getSessionStats,
   getStatus,
   setDetailedLogging,
+  setEdsmCredentials,
   setEnabled,
   setManualJournalPath,
   setUploaderId,
@@ -23,17 +24,26 @@ import {
   stopWatcher,
 } from "./api";
 
+const EDSM_API_KEY_URL = "https://www.edsm.net/en/settings/api";
+
+// Index access on the target map may miss at runtime (e.g. before the first
+// status load), so read through a helper that reflects the possibly-undefined.
+const readTarget = (map: TargetStatsMap, key: string): TargetStats | undefined => map[key];
+
 const Content = (): JSX.Element => {
   const [enabled, setEnabledState] = useState(true);
   const [watcherRunning, setWatcherRunning] = useState(false);
   const [edRunning, setEdRunning] = useState(false);
   const [journalPath, setJournalPath] = useState<string | null>(null);
   const [journalPathSource, setJournalPathSource] = useState<string | null>(null);
-  const [successCount, setSuccessCount] = useState(0);
-  const [failCount, setFailCount] = useState(0);
+  const [targets, setTargets] = useState<TargetStatsMap>({});
   const [uploaderId, setUploaderIdState] = useState<string>("");
   const [manualPathInput, setManualPathInput] = useState<string>("");
   const [uploaderIdInput, setUploaderIdInput] = useState<string>("");
+  const [edsmCommanderInput, setEdsmCommanderInput] = useState<string>("");
+  const [edsmApiKeyInput, setEdsmApiKeyInput] = useState<string>("");
+  const [edsmApiKeySet, setEdsmApiKeySet] = useState<boolean>(false);
+  const [edsmSaved, setEdsmSaved] = useState<boolean>(false);
   const [pathError, setPathError] = useState<string | null>(null);
   const [detailedLogging, setDetailedLoggingState] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticsResult | null>(null);
@@ -55,12 +65,13 @@ const Content = (): JSX.Element => {
         setEdRunning(status.ed_running);
         setJournalPath(status.journal_path);
         setJournalPathSource(status.journal_path_source);
-        setSuccessCount(status.success_count);
-        setFailCount(status.fail_count);
+        setTargets(status.targets);
         const uid = status.uploader_id;
         setUploaderIdState(uid);
         setUploaderIdInput(uid);
         uploaderIdRef.current = uid;
+        setEdsmCommanderInput(status.edsm_commander_name);
+        setEdsmApiKeySet(status.edsm_api_key_set);
         setDetailedLoggingState(status.detailed_logging);
       } catch (e) {
         console.error("Failed to load status", e);
@@ -82,8 +93,8 @@ const Content = (): JSX.Element => {
   // Listen for backend events
   useEffect((): (() => void) => {
     const statusListener = addEventListener("status_update", (data: StatusUpdateEvent): void => {
-      setSuccessCount(data.success_count);
-      setFailCount(data.fail_count);
+      // Full per-target snapshot (reset, EDSM batch completion).
+      setTargets(data.targets);
     });
 
     const edStateListener = addEventListener("ed_state_change", (data: EdStateChangeEvent): void => {
@@ -94,12 +105,19 @@ const Content = (): JSX.Element => {
       setSessionStats(data);
     });
 
+    // EDDN per-event totals update the "eddn" target entry in place.
     const successListener = addEventListener("upload_success", (data: UploadSuccessEvent): void => {
-      setSuccessCount(data.total_success);
+      setTargets((prev): TargetStatsMap => {
+        const eddn = readTarget(prev, "eddn") ?? { success_count: 0, fail_count: 0 };
+        return { ...prev, eddn: { ...eddn, success_count: data.total_success } };
+      });
     });
 
     const failListener = addEventListener("upload_failed", (data: UploadFailedEvent): void => {
-      setFailCount(data.total_failed);
+      setTargets((prev): TargetStatsMap => {
+        const eddn = readTarget(prev, "eddn") ?? { success_count: 0, fail_count: 0 };
+        return { ...prev, eddn: { ...eddn, fail_count: data.total_failed } };
+      });
     });
 
     const activityListener = addEventListener("activity_update", (entry: ActivityEntry): void => {
@@ -187,6 +205,14 @@ const Content = (): JSX.Element => {
     uploaderIdRef.current = uploaderIdInput;
   };
 
+  const handleSetEdsmCredentials = async (): Promise<void> => {
+    await setEdsmCredentials(edsmCommanderInput, edsmApiKeyInput);
+    // A key is now saved if one was just entered, or one was already saved.
+    setEdsmApiKeySet((prev): boolean => prev || edsmApiKeyInput.length > 0);
+    setEdsmApiKeyInput("");
+    setEdsmSaved(true);
+  };
+
   const handleRescan = async (): Promise<void> => {
     const result = await findJournalPath();
     if (result.success) {
@@ -209,6 +235,15 @@ const Content = (): JSX.Element => {
     return edRunning ? "🟢 Running" : "⚪ Not Running";
   };
 
+  const getEdsmStatusText = (): string => {
+    if (!edsmApiKeySet) return "⚪ Inactive — no API key set";
+    const edsmActive = readTarget(targets, "edsm")?.active ?? false;
+    if (edsmActive) return "🟢 Active — forwarding this session";
+    return edRunning
+      ? "🟡 Enabled — starting…"
+      : "🟡 Enabled — starts when Elite Dangerous launches";
+  };
+
   const getJournalStatusText = (): string => {
     if (!journalPath) return "🔍 Not Found";
     if (watcherRunning) return "🟢 Watching";
@@ -218,7 +253,7 @@ const Content = (): JSX.Element => {
 
   const getActivityKey = (entry: ActivityEntry): string => {
     const status = entry.http_status != null ? String(entry.http_status) : "na";
-    return `${entry.timestamp}-${entry.event_type}-${entry.outcome}-${status}`;
+    return `${entry.timestamp}-${entry.event_type}-${entry.target}-${entry.outcome}-${status}`;
   };
 
   const hasSessionData = (s: SessionStats | null): boolean => {
@@ -238,6 +273,30 @@ const Content = (): JSX.Element => {
       <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</span>
     </div>
   );
+
+  const formatTargetLabel = (key: string): string => key.toUpperCase();
+
+  const renderUploadTargets = (): JSX.Element => {
+    const entries = Object.entries(targets);
+    if (entries.length === 0) {
+      return (
+        <PanelSectionRow>
+          <Field label="Uploads">No uploads yet</Field>
+        </PanelSectionRow>
+      );
+    }
+    return (
+      <>
+        {entries.map(([key, stats]: [string, TargetStats]): JSX.Element => (
+          <PanelSectionRow key={key}>
+            <Field label={formatTargetLabel(key)}>
+              ✅ {stats.success_count} ❌ {stats.fail_count}
+            </Field>
+          </PanelSectionRow>
+        ))}
+      </>
+    );
+  };
 
   const renderSession = (): JSX.Element => {
     if (!hasSessionData(sessionStats) || !sessionStats) {
@@ -293,11 +352,7 @@ const Content = (): JSX.Element => {
             {getJournalStatusText()}
           </Field>
         </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Uploads">
-            ✅ {successCount} ❌ {failCount}
-          </Field>
-        </PanelSectionRow>
+        {renderUploadTargets()}
       </PanelSection>
 
       <PanelSection title="Recent Activity">
@@ -309,7 +364,10 @@ const Content = (): JSX.Element => {
           recentActivity.map((entry: ActivityEntry): JSX.Element => (
             <PanelSectionRow key={getActivityKey(entry)}>
               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <span>{entry.outcome === "success" ? "✅" : "❌"} {entry.event_type}</span>
+                <span>
+                  {entry.outcome === "success" ? "✅" : "❌"} {entry.event_type}
+                  <span style={{ fontSize: "11px", opacity: 0.6 }}> · {formatTargetLabel(entry.target)}</span>
+                </span>
                 <span style={{ fontSize: "12px", opacity: 0.7 }}>{new Date(entry.timestamp).toLocaleTimeString()}</span>
               </div>
             </PanelSectionRow>
@@ -377,6 +435,58 @@ const Content = (): JSX.Element => {
         )}
       </PanelSection>
 
+      <PanelSection title="EDSM">
+        <PanelSectionRow>
+          <div style={{ width: "100%", fontSize: "12px", opacity: 0.8, textAlign: "justify" }}>
+            EDSM uploads your flight logs under your <strong>named EDSM identity</strong>,
+            unlike anonymous EDDN. It is off until you enter an API key.
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Field label="Status">
+            {getEdsmStatusText()}
+          </Field>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <TextField
+            label="EDSM Commander Name"
+            value={edsmCommanderInput}
+            onChange={(e): void => { setEdsmCommanderInput(e.target.value); }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <TextField
+            label={edsmApiKeySet ? "EDSM API Key (saved — leave blank to keep)" : "EDSM API Key"}
+            value={edsmApiKeyInput}
+            onChange={(e): void => {
+              setEdsmApiKeyInput(e.target.value);
+              setEdsmSaved(false);
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={(): void => { void handleSetEdsmCredentials(); }}
+            disabled={!edsmCommanderInput || (!edsmApiKeyInput && !edsmApiKeySet)}
+          >
+            Save EDSM Credentials
+          </ButtonItem>
+        </PanelSectionRow>
+        {edsmSaved && (
+          <PanelSectionRow>
+            <div style={{ width: "100%", fontSize: "12px", textAlign: "left" }}>
+              ✅ Saved
+            </div>
+          </PanelSectionRow>
+        )}
+        <PanelSectionRow>
+          <div style={{ width: "100%", fontSize: "12px", opacity: 0.7, textAlign: "left", overflowWrap: "anywhere" }}>
+            Generate your API key at {EDSM_API_KEY_URL}
+          </div>
+        </PanelSectionRow>
+      </PanelSection>
+
       <PanelSection title="Recent Errors">
         {recentErrors.length === 0 ? (
           <PanelSectionRow>
@@ -385,7 +495,7 @@ const Content = (): JSX.Element => {
         ) : (
           recentErrors.map((entry: ActivityEntry): JSX.Element => (
             <PanelSectionRow key={getActivityKey(entry)}>
-              <Field label={entry.event_type}>
+              <Field label={`${entry.event_type} · ${formatTargetLabel(entry.target)}`}>
                 <div style={{ fontSize: "12px" }}>
                   <div>{new Date(entry.timestamp).toLocaleTimeString()} — {entry.error_type}</div>
                   <div>{entry.error_message}{entry.http_status != null ? ` (${String(entry.http_status)})` : ""}</div>

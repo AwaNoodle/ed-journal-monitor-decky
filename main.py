@@ -21,6 +21,7 @@ if str(_bin_dir) not in sys.path:
 
 from src.modules.activity_log import ActivityLog  # noqa: E402
 from src.modules.diagnostics import create_diagnostics as _create_diagnostics  # noqa: E402
+from src.modules.forwarders.edsm import EdsmForwarder  # noqa: E402
 from src.modules.parser import JournalParser  # noqa: E402
 from src.modules.path_finder import JournalPathFinder  # noqa: E402
 from src.modules.session_stats import SessionStats, SessionStatsAccumulator  # noqa: E402
@@ -40,7 +41,11 @@ class Plugin:
         self.activity_log: ActivityLog | None = None
         self.submitter: EDDNSubmitter | None = None
         self.session_stats: SessionStatsAccumulator | None = None
+        self.edsm: EdsmForwarder | None = None
         self.watcher: JournalWatcher | None = None
+        # Stream consumers driven by lifecycle/stats fan-out (session stats,
+        # EDSM forwarder, ...). The watcher fans observe() to the same list.
+        self.consumers: list = []
         self.ed_running: bool = False
         # Strong references to in-flight emit tasks (asyncio keeps only weak
         # references, so an unreferenced task can be GC'd mid-flight).
@@ -71,6 +76,12 @@ class Plugin:
         self.activity_log = ActivityLog()
         self.submitter = EDDNSubmitter(self.settings, activity_log=self.activity_log)
         self.session_stats = SessionStatsAccumulator(on_change=self._on_session_stats_change)
+        self.edsm = EdsmForwarder(
+            self.settings,
+            on_stats_change=self._on_target_stats_change,
+            activity_log=self.activity_log,
+        )
+        self.consumers = [self.session_stats, self.edsm]
         signal_batcher = SignalBatcher()
         self.watcher = JournalWatcher(
             settings=self.settings,
@@ -78,7 +89,7 @@ class Plugin:
             validator=self.validator,
             submitter=self.submitter,
             signal_batcher=signal_batcher,
-            consumers=[self.session_stats],
+            consumers=self.consumers,
         )
 
         # Try to find journal path from cache or VDF scan
@@ -102,6 +113,7 @@ class Plugin:
         decky.logger.info("ED Journal Monitor unloading...")
         if self.watcher and self.watcher.is_running:
             await self.watcher.stop()
+            self._notify_consumers_session_stop()
         decky.logger.info("ED Journal Monitor unloaded")
 
     async def _uninstall(self) -> None:
@@ -137,6 +149,7 @@ class Plugin:
             return {"success": True, "status": "not_running"}
 
         await self.watcher.stop()
+        self._notify_consumers_session_stop()
         return {"success": True, "status": "stopped"}
 
     async def find_journal_path(self) -> dict:
@@ -156,30 +169,49 @@ class Plugin:
         journal_path = self.settings.get("journal_path") if self.settings else None
         uploader_id = self.settings.get("uploader_id") if self.settings else None
 
-        stats = {
-            "success_count": 0,
-            "fail_count": 0,
-            "last_upload_time": None,
-            "last_upload_event": None,
-        }
-        if self.submitter:
-            stats.update(self.submitter.get_stats())
-
         return {
             "ed_running": self.ed_running,
             "watcher_running": is_running,
             "journal_path": journal_path,
             "journal_path_source": self.settings.get("journal_path_source") if self.settings else None,
             "uploader_id": uploader_id,
+            "edsm_commander_name": self.settings.get("edsm_commander_name", "") if self.settings else "",
+            "edsm_api_key_set": bool(self.settings.get("edsm_api_key")) if self.settings else False,
             "enabled": self.settings.get("enabled", True) if self.settings else True,
             "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
-            **stats,
+            **self._build_target_stats(),
         }
 
     async def set_uploader_id(self, uploader_id: str) -> dict:
         """Set the EDDN uploader ID."""
         await self.settings.set("uploader_id", uploader_id)
         return {"success": True}
+
+    async def set_edsm_credentials(self, commander_name: str, api_key: str) -> dict:
+        """Set the EDSM commander name and API key. The API key's presence is the
+        consent gate for identifiable EDSM uploads.
+
+        If Elite Dangerous is already running when credentials are saved, the
+        EDSM forwarder is (re)started immediately so the user doesn't have to
+        relaunch the game to begin forwarding — mirroring the on_session_start
+        hook fired at ED start.
+        """
+        await self.settings.set("edsm_commander_name", commander_name)
+        # An empty api_key means "keep the existing saved key" so the user can
+        # update the commander name without re-pasting their key.
+        if api_key:
+            await self.settings.set("edsm_api_key", api_key)
+        if self.ed_running and self.edsm is not None:
+            self.edsm.on_session_start()
+            await decky.emit("status_update", self._build_target_stats())
+        return {"success": True}
+
+    async def get_edsm_credentials(self) -> dict:
+        """Return the EDSM commander name and whether an API key is set. The raw
+        API key is never returned to the frontend."""
+        commander_name = self.settings.get("edsm_commander_name", "") if self.settings else ""
+        api_key_set = bool(self.settings.get("edsm_api_key")) if self.settings else False
+        return {"commander_name": commander_name, "api_key_set": api_key_set}
 
     async def set_enabled(self, enabled: bool) -> dict:
         """Enable or disable the monitor."""
@@ -204,14 +236,17 @@ class Plugin:
         if enabled == self.ed_running:
             return {"success": True}
         self.ed_running = enabled
-        if enabled and self.submitter:
-            self.submitter.reset_stats()
-            await decky.emit("status_update", self.submitter.get_stats())
-        if enabled and self.session_stats:
-            # Reset session stats on the same launch epoch as upload stats.
-            # Runs before start_watcher's _initial_scan replay so the current
-            # launch's earlier events are recounted (retroactive totals).
-            self.session_stats.reset()
+        if enabled:
+            if self.submitter:
+                self.submitter.reset_stats()
+            # New launch epoch: reset/start every stream consumer (session
+            # stats, EDSM forwarder). Runs before start_watcher's _initial_scan
+            # replay so the current launch's earlier events are recounted.
+            for consumer in self.consumers:
+                start = getattr(consumer, "on_session_start", None)
+                if callable(start):
+                    start()
+            await decky.emit("status_update", self._build_target_stats())
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 
@@ -251,6 +286,36 @@ class Plugin:
 
     # --- internal helpers ---
 
+    def _build_target_stats(self) -> dict:
+        """Aggregate per-target upload stats by iterating the consumer registry.
+
+        EDDN is wired in as one target entry from the embedded submitter; every
+        consumer that reports upload stats contributes an entry under its own
+        ``name``. The map uses no hardcoded per-target reporting branches, so a
+        further target is purely additive.
+        """
+        targets: dict = {}
+        if self.submitter:
+            targets["eddn"] = self.submitter.get_stats()
+        for consumer in self.consumers:
+            if getattr(consumer, "reports_upload_stats", False):
+                targets[consumer.name] = consumer.get_stats()
+        return {
+            "targets": targets,
+            "last_upload_time": None,
+            "last_upload_event": None,
+        }
+
+    def _notify_consumers_session_stop(self) -> None:
+        """Call on_session_stop for every consumer (e.g. forced EDSM flush)."""
+        for consumer in self.consumers:
+            stop = getattr(consumer, "on_session_stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception as e:
+                    decky.logger.error(f"Consumer on_session_stop error: {e}")
+
     def _on_session_stats_change(self, stats: dict) -> None:
         """Emit a session_update to the frontend when session stats change."""
         try:
@@ -259,5 +324,16 @@ class Plugin:
             # No running event loop (e.g. during teardown) — skip emit.
             return
         task = loop.create_task(decky.emit("session_update", stats))
+        self._emit_tasks.add(task)
+        task.add_done_callback(self._emit_tasks.discard)
+
+    def _on_target_stats_change(self) -> None:
+        """Emit a status_update with the full per-target map when a non-EDDN
+        target's stats change (e.g. an EDSM batch completes)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(decky.emit("status_update", self._build_target_stats()))
         self._emit_tasks.add(task)
         task.add_done_callback(self._emit_tasks.discard)

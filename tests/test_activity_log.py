@@ -82,6 +82,66 @@ class TestEntryCreation:
         assert emitted_entry["outcome"] == "failure"
 
 
+class TestTargetTagging:
+    """Tests for the per-entry target field."""
+
+    @pytest.mark.asyncio
+    async def test_success_defaults_to_eddn_target(self):
+        log = ActivityLog()
+        with patch("src.modules.activity_log.decky") as mock_decky:
+            mock_decky.emit = AsyncMock()
+            await log.record_success("FSDJump")
+
+        assert log._entries[0]["target"] == "eddn"
+
+    @pytest.mark.asyncio
+    async def test_failure_defaults_to_eddn_target(self):
+        log = ActivityLog()
+        with patch("src.modules.activity_log.decky") as mock_decky:
+            mock_decky.emit = AsyncMock()
+            await log.record_failure("Scan", "http_error", "Bad Request", http_status=400)
+
+        assert log._entries[0]["target"] == "eddn"
+
+    @pytest.mark.asyncio
+    async def test_success_records_explicit_edsm_target(self):
+        log = ActivityLog()
+        with patch("src.modules.activity_log.decky") as mock_decky:
+            mock_decky.emit = AsyncMock()
+            await log.record_success("Rank", target="edsm")
+
+        entry = log._entries[0]
+        assert entry["target"] == "edsm"
+        assert entry["outcome"] == "success"
+        assert entry["event_type"] == "Rank"
+
+    @pytest.mark.asyncio
+    async def test_failure_records_explicit_edsm_target(self):
+        log = ActivityLog()
+        with patch("src.modules.activity_log.decky") as mock_decky:
+            mock_decky.emit = AsyncMock()
+            await log.record_failure(
+                "FSDJump", "edsm", "[203] Commander name/API Key not found", target="edsm",
+            )
+
+        entry = log._entries[0]
+        assert entry["target"] == "edsm"
+        assert entry["outcome"] == "failure"
+        assert entry["error_type"] == "edsm"
+        assert "203" in entry["error_message"]
+        assert entry["http_status"] is None
+
+    @pytest.mark.asyncio
+    async def test_target_included_in_emitted_entry(self):
+        log = ActivityLog()
+        with patch("src.modules.activity_log.decky") as mock_decky:
+            mock_decky.emit = AsyncMock()
+            await log.record_success("Rank", target="edsm")
+
+        emitted_entry = mock_decky.emit.call_args[0][1]
+        assert emitted_entry["target"] == "edsm"
+
+
 class TestBufferOverflow:
     """Tests for circular buffer behavior."""
 

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import decky
+from src.modules.constants import TARGET_EDDN
 
 MAX_ENTRIES = 50
 
@@ -20,11 +21,12 @@ class ActivityLog:
     def __init__(self, max_entries: int = MAX_ENTRIES) -> None:
         self._entries: deque[dict[str, Any]] = deque(maxlen=max_entries)
 
-    async def record_success(self, event_type: str) -> None:
+    async def record_success(self, event_type: str, target: str = TARGET_EDDN) -> None:
         """Record a successful upload and emit activity_update."""
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": event_type,
+            "target": target,
             "outcome": "success",
             "error_type": None,
             "error_message": None,
@@ -39,11 +41,13 @@ class ActivityLog:
         error_type: str,
         error_message: str,
         http_status: int | None = None,
+        target: str = TARGET_EDDN,
     ) -> None:
         """Record a failed upload and emit activity_update."""
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": event_type,
+            "target": target,
             "outcome": "failure",
             "error_type": error_type,
             "error_message": error_message,

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **EDSM forwarding**: a second submission target that forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile, alongside (and isolated from) EDDN. Enter your EDSM commander name and API key in the new **EDSM** panel section to enable it — uploads are **off by default** because EDSM submissions are identifiable (tied to your named account), unlike anonymous EDDN. Includes EDSM's discard-list filter, batched submission with size/time/shutdown flush, `msgnum`/rate-limit handling, and a compact EDSM status block surfacing the last response message. The EDSM section shows a live status line (inactive / enabled / active), confirms when credentials are saved, and lets you update the commander name without re-pasting the key. Saving credentials while Elite Dangerous is already running activates EDSM immediately (no relaunch needed). New `set_edsm_credentials`/`get_edsm_credentials` callables and `edsm_commander_name`/`edsm_api_key` settings.
+- **Target-tagged activity log**: Recent Activity and Recent Errors now show which target (EDDN / EDSM) each event was sent to, with a compact target badge on every row. EDSM events are recorded per-event when a batch is confirmed, and EDSM failures (e.g. a bad-key `203`) surface in Recent Errors. Because EDDN (a narrow allow-list) and EDSM (a broad deny-list) carry different, only-partially-overlapping streams, an event sent to both appears as one EDDN row and one EDSM row.
+
+### Changed
+
+- Upload statistics are now reported **per target** (a target-keyed map aggregated by iterating the consumer registry) so EDDN and EDSM counts are independent and a future target is additive. The frontend renders upload counts by mapping over targets. EDDN validation/transform/submission behavior is unchanged.
+- EDSM upload statistics are counted **per event** (not per batch), counted only on terminal responses, so the EDDN and EDSM "Uploads" numbers mean the same unit.
+
+### Internal
+
+- Extended the `StreamConsumer` protocol with lifecycle + stats hooks (`name`, `get_stats`, `on_session_start`, `on_session_stop`); `main.py` drives them across all consumers.
+- Lifted the shared SSL-context builder out of `submitter.py` into `src/modules/ssl_context.py`, reused by the EDDN submitter and the new EDSM client.
+
 ## [0.4.0] - 2026-06-27
 
 ### Added

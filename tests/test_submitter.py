@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from conftest import MockSettings
 
-from src.modules.submitter import EDDN_URL, MAX_RETRIES, EDDNSubmitter, _build_ssl_context
+from src.modules.submitter import EDDN_URL, MAX_RETRIES, EDDNSubmitter
 
 
 @pytest.fixture
@@ -309,78 +309,7 @@ class TestActivityLogIntegration:
 
 
 class TestSSLContext:
-    """Tests for SSL context construction (PyInstaller/Decky fix)."""
-
-    def test_env_var_takes_priority(self):
-        """SSL_CERT_FILE env var takes priority over other sources."""
-        with patch.dict("os.environ", {"SSL_CERT_FILE": "/custom/ca.pem"}), \
-             patch("src.modules.submitter.Path") as mock_path:
-            mock_path.return_value.is_file.return_value = True
-            with patch("ssl.create_default_context") as mock_create:
-                mock_create.return_value = MagicMock()
-                _build_ssl_context()
-            mock_create.assert_called_once_with(cafile="/custom/ca.pem")
-
-    def test_certifi_used_when_no_env_var(self):
-        """certifi bundle is used when SSL_CERT_FILE is not set."""
-        mock_certifi = MagicMock()
-        mock_certifi.where.return_value = "/tmp/_MEI/certifi/cacert.pem"
-        with patch.dict("os.environ", {}, clear=True), \
-             patch.dict("sys.modules", {"certifi": mock_certifi}), \
-             patch("src.modules.submitter.Path") as mock_path:
-            mock_path.return_value.is_file.return_value = True
-            with patch("ssl.create_default_context") as mock_create:
-                mock_create.return_value = MagicMock()
-                _build_ssl_context()
-            mock_create.assert_called_once_with(cafile="/tmp/_MEI/certifi/cacert.pem")
-
-    def test_system_ca_used_when_certifi_missing(self):
-        """System CA bundle is used when certifi is not available."""
-        # Simulate ImportError for certifi by making the try/except catch it
-        original_import = __import__
-        certifi_block_count = 0
-
-        def blocking_import(name, *args, **kwargs):
-            nonlocal certifi_block_count
-            if name == "certifi":
-                certifi_block_count += 1
-                raise ImportError("certifi")
-            return original_import(name, *args, **kwargs)
-
-        with patch.dict("os.environ", {}, clear=True), \
-             patch("src.modules.submitter._SYSTEM_CA_PATHS", ["/etc/ssl/cert.pem"]), \
-             patch("src.modules.submitter.Path") as mock_path:
-            mock_path_instance = MagicMock()
-            mock_path_instance.is_file.return_value = True
-            mock_path.return_value = mock_path_instance
-            with patch("builtins.__import__", side_effect=blocking_import), \
-                 patch("ssl.create_default_context") as mock_create:
-                mock_create.return_value = MagicMock()
-                _build_ssl_context()
-            mock_create.assert_called_once_with(cafile="/etc/ssl/cert.pem")
-        assert certifi_block_count > 0  # certifi was attempted and blocked
-
-    def test_default_context_when_nothing_found(self):
-        """Returns default context when no CA bundle is available."""
-        original_import = __import__
-
-        def blocking_import(name, *args, **kwargs):
-            if name == "certifi":
-                raise ImportError("certifi")
-            return original_import(name, *args, **kwargs)
-
-        with patch.dict("os.environ", {}, clear=True), \
-             patch("src.modules.submitter._SYSTEM_CA_PATHS", []), \
-             patch("src.modules.submitter.Path") as mock_path:
-            mock_path_instance = MagicMock()
-            mock_path_instance.is_file.return_value = False
-            mock_path.return_value = mock_path_instance
-            with patch("builtins.__import__", side_effect=blocking_import), \
-                 patch("ssl.create_default_context") as mock_create:
-                mock_create.return_value = MagicMock()
-                _build_ssl_context()
-            # Should be called with no cafile (default context)
-            mock_create.assert_called_once_with()
+    """Tests that the submitter wires the shared SSL context into requests."""
 
     @pytest.mark.asyncio
     async def test_submit_passes_ssl_context_to_urlopen(self, submitter):

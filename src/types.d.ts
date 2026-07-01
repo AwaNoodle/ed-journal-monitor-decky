@@ -13,10 +13,24 @@ declare module "*.jpg" {
   export default content;
 }
 
-// Decky API event listener types
-interface StatusUpdateEvent {
+// Per-target upload statistics. Keyed by target name (e.g. "eddn", "edsm") so
+// the UI renders by mapping over entries — no hardcoded per-target keys.
+interface TargetStats {
   success_count: number;
   fail_count: number;
+  last_msgnum?: number | null;
+  last_msg?: string | null;
+  active?: boolean;
+  queued?: number;
+}
+
+type TargetStatsMap = Record<string, TargetStats>;
+
+// Decky API event listener types
+interface StatusUpdateEvent {
+  targets: TargetStatsMap;
+  last_upload_time: string | null;
+  last_upload_event: string | null;
 }
 
 interface UploadSuccessEvent {
@@ -30,9 +44,14 @@ interface UploadFailedEvent {
   total_failed: number;
 }
 
+// Submission target an activity entry / stats map is attributed to. Extend this
+// union (and the backend UploadTarget Literal) to add a target like Inara.
+type UploadTarget = "eddn" | "edsm";
+
 interface ActivityEntry {
   timestamp: string;
   event_type: string;
+  target: UploadTarget;
   outcome: "success" | "failure";
   error_type: string | null;
   error_message: string | null;
@@ -87,11 +106,21 @@ interface GetStatusResult {
   watcher_running: boolean;
   journal_path: string | null;
   journal_path_source: string | null;
-  success_count: number;
-  fail_count: number;
+  targets: TargetStatsMap;
+  last_upload_time: string | null;
+  last_upload_event: string | null;
   uploader_id: string;
+  edsm_commander_name: string;
+  edsm_api_key_set: boolean;
   detailed_logging: boolean;
 }
+
+interface GetEdsmCredentialsResult {
+  commander_name: string;
+  api_key_set: boolean;
+}
+
+type SetEdsmCredentialsResult = BasicSuccessResult;
 
 interface DiagnosticsResult {
   success: boolean;

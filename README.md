@@ -11,6 +11,7 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 - **Hands-off operation**: Automatically detects when Elite Dangerous starts and stops, beginning/ending journal monitoring accordingly
 - **Auto-discovery**: Finds the ED journal directory by scanning Steam's library configuration — no manual setup required for Steam installs
 - **EDDN submission**: Validates and submits journal/1 events plus Market/Outfitting/Shipyard auxiliary schemas to EDDN
+- **EDSM forwarding (opt-in)**: Optionally forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile under your own credentials, alongside and fully isolated from EDDN. Off by default — EDSM uploads are identifiable (tied to your named account), so you enable it by entering an API key
 - **No root access required**: All operations use user-accessible filesystem paths
 - **Steam Deck optimized**: Lightweight polling-based watcher (default 10s interval), minimal resource usage
 - **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
@@ -40,11 +41,12 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 ## UI Panel
 
-The Decky plugin panel has six sections:
+The Decky plugin panel has seven sections:
 
 - **Session**: A live, player-facing summary of the current ED game launch — a hero location line (current system) above a 2×2 grid of counters (jumps, distance in ly, bodies scanned, first discoveries). Resets on each game launch (and when the active commander changes); shows a neutral empty state before any events are seen.
-- **Status**: Enabled toggle, ED status (running/not running), Journal status (watching/found/not found), upload counts (✅ success / ❌ failed), last upload event & time
+- **Status**: Enabled toggle, ED status (running/not running), Journal status (watching/found/not found), **per-target upload counts** (✅ success / ❌ failed for each of EDDN and EDSM), and a compact EDSM status block (counts + last response message, or an inactive notice when no API key is set)
 - **Configuration**: Journal path display, path source (auto/manual), re-scan button, manual journal path input, EDDN uploader ID input, notification when no uploader ID is set
+- **EDSM**: EDSM commander name + API key inputs (with an identifiability/consent notice and a link to where the key is generated), and an inactive notice when no API key is set
 - **Recent Errors**: Last 5 failed uploads with event type, timestamp, error classification, error message, and HTTP status
 - **Recent Activity**: Last 10 upload attempts with success/failure indicator, event type, and timestamp
 - **Diagnostics**: Detailed logging toggle, create diagnostic bundle button, bundle result (path + size)
@@ -80,6 +82,17 @@ You can also click **Re-scan for Journal Path** at any time to retry auto-detect
 The plugin will automatically populate the uploader ID from your CMDR name when you start a new game. This identifies your submissions on the EDDN network.
 
 You can also set it manually in the plugin settings. EDDN recommends using your CMDR name.
+
+### EDSM Forwarding (optional)
+
+The plugin can also forward your journal events to your [EDSM](https://www.edsm.net/) profile, in addition to EDDN. This is **opt-in and off by default**: unlike EDDN's anonymous, hashed uploader IDs, **EDSM uploads are identifiable** — they are tied to your named EDSM account and land on your public/private commander profile (flight logs, visited systems, scans).
+
+To enable it, open the **EDSM** section of the panel and enter:
+
+1. **EDSM Commander Name** — your commander name as registered on EDSM.
+2. **EDSM API Key** — generated at **Settings → My API Key** on EDSM: <https://www.edsm.net/en/settings/api>
+
+The key's presence is the consent gate — once a key is saved, EDSM forwarding activates on the next game session. EDSM forwarding is fully isolated from EDDN: an EDSM error (e.g. wrong credentials, surfaced as a "check your EDSM credentials" message) never affects EDDN submission, and vice-versa. Only the Live game version is forwarded (Legacy is not). The EDSM status block shows EDSM's own success/fail counts and last response message.
 
 ### Detailed Logging
 

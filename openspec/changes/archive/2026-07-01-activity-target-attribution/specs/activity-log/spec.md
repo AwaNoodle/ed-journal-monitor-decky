@@ -1,7 +1,5 @@
-## Purpose
+## MODIFIED Requirements
 
-Maintain and expose a rolling in-memory log of recent per-event upload attempts across submission targets.
-## Requirements
 ### Requirement: Maintain in-memory activity log
 The backend SHALL maintain a circular buffer of the last 50 upload activity entries, stored in a dedicated `ActivityLog` module. Entries SHALL be recorded for any submission target (EDDN and EDSM), each tagged with the target it was sent to.
 
@@ -33,28 +31,6 @@ The backend SHALL maintain a circular buffer of the last 50 upload activity entr
 - **WHEN** the plugin restarts
 - **THEN** the ActivityLog SHALL start empty (no persistence)
 
-### Requirement: Expose activity log via callable
-The backend SHALL provide a `get_recent_activity` callable that returns recent activity entries.
-
-#### Scenario: Fetch all recent activity
-- **WHEN** the frontend calls `get_recent_activity` with no arguments
-- **THEN** the backend SHALL return the last 50 entries (or fewer if less are available) as an array, newest first
-
-#### Scenario: Fetch recent activity with limit
-- **WHEN** the frontend calls `get_recent_activity` with a `limit` parameter (e.g. 10)
-- **THEN** the backend SHALL return at most that many entries, newest first
-
-#### Scenario: Fetch only errors
-- **WHEN** the frontend calls `get_recent_activity` with `outcome: "failure"` filter
-- **THEN** the backend SHALL return only entries where `outcome` is `"failure"`, newest first, up to the limit
-
-### Requirement: Emit real-time activity updates
-The backend SHALL emit an `activity_update` event to the frontend each time a new entry is added to the activity log.
-
-#### Scenario: Activity entry added
-- **WHEN** a new entry is appended to the ActivityLog
-- **THEN** the backend SHALL emit an `activity_update` event containing the new entry
-
 ### Requirement: Activity entry structure
 Each activity entry SHALL be a dict with the following fields: `timestamp` (ISO 8601 string), `event_type` (string, e.g. "FSDJump"), `target` (`UploadTarget`: "eddn" or "edsm"), `outcome` ("success" or "failure"), `error_type` (string or null: "http_error", "network_error", "validation_error", "edsm"), `error_message` (string or null), `http_status` (integer or null).
 
@@ -73,4 +49,3 @@ Each activity entry SHALL be a dict with the following fields: `timestamp` (ISO 
 #### Scenario: EDSM error entry structure
 - **WHEN** a failed EDSM submission is recorded
 - **THEN** the entry SHALL have `outcome: "failure"`, `target: "edsm"`, `error_type: "edsm"`, `error_message` containing the `msgnum` and EDSM message, and `http_status: null`
-

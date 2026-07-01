@@ -17,13 +17,22 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - No root flag needed
 
 ### Backend Callable Methods (frontend→backend)
-`get_status`, `start_watcher`, `stop_watcher`, `find_journal_path`, `set_journal_path`, `set_enabled`, `set_uploader_id`, `set_detailed_logging`, `set_ed_running`, `check_ed_running`, `create_diagnostics`, `get_recent_activity`, `get_session_stats`
+`get_status`, `start_watcher`, `stop_watcher`, `find_journal_path`, `set_journal_path`, `set_enabled`, `set_uploader_id`, `set_edsm_credentials`, `get_edsm_credentials`, `set_detailed_logging`, `set_ed_running`, `check_ed_running`, `create_diagnostics`, `get_recent_activity`, `get_session_stats`
 
 ### Backend-Emitted Events (backend→frontend)
 `ed_state_change`, `upload_success`, `upload_failed`, `status_update`, `activity_update`, `commander_detected`, `session_update`
 
 ### Stream Consumers
-The watcher fans every parsed event out to a `list[StreamConsumer]` (`src/modules/stream_consumer.py`) — a thin `observe(event, session_state)` protocol — **before** the EDDN reportable filter, in parallel to (never gating) EDDN routing. The session-stats accumulator (`session_stats`) is consumer #1; this is the seam a future EDSM forwarder will append to.
+The watcher fans every parsed event out to a `list[StreamConsumer]` (`src/modules/stream_consumer.py`) — protocol: `observe(event, session_state)` plus lifecycle/stats hooks `name`, `get_stats()`, `on_session_start()`, `on_session_stop()` — **before** the EDDN reportable filter, in parallel to (never gating) EDDN routing. Consumer #1 is the session-stats accumulator (`session_stats`); consumer #2 is the EDSM forwarder (`forwarders/edsm.py`). `main.py` drives `on_session_start()` for every consumer at the `set_ed_running(true)` hook and `on_session_stop()` when the watcher stops.
+
+### EDSM Forwarding (second submission target)
+`forwarders/edsm.py` (`EdsmForwarder`) is a stream consumer that forwards **raw journal lines verbatim** (no EDDN transform) to EDSM's `api-journal-v1` under the user's own credentials, via the stdlib `urllib` client in `forwarders/edsm_client.py`. It is fully isolated from EDDN: it copies the event before enriching with transient-state hints, filters by EDSM's discard list (fetched once per session), batches with size/time/forced-on-stop flush, and classifies responses by `msgnum` (1xx OK · 2xx fatal/no-retry · 5xx transient/retry) with rate-limit backoff. EDSM is **off until an API key is set** (the key's presence is the identifiable-upload consent gate). Settings keys: `edsm_commander_name`, `edsm_api_key`.
+
+### Activity log (target-tagged)
+Every activity entry carries a `target` field (`UploadTarget = "eddn" | "edsm"`, defined in `constants.py`; `record_success`/`record_failure` default it to `eddn`). EDDN records per event at submit time; the EDSM forwarder holds the same `ActivityLog` and records **per event only on a terminal batch response** (success → one success entry per event; fatal → one failure entry per event with `error_type="edsm"` and the `msgnum` folded into `error_message`; transient/retried → records nothing until it settles). EDSM upload counts are per event (not per batch), counted only on terminal outcomes, so EDDN and EDSM counts mean the same unit. The frontend renders a target badge on each Recent Activity and Recent Errors row.
+
+### Per-target upload stats
+Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm": {...}}, "last_upload_time", "last_upload_event"}`) built in `main.py._build_target_stats()` by iterating the consumer registry (EDDN wired in as one entry; any consumer with `reports_upload_stats = True` contributes under its `name`). No hardcoded per-target keys — a 3rd target is purely additive. `get_status` and the `status_update` emit both carry this map; the frontend renders by mapping over entries. The shared SSL context builder lives in `src/modules/ssl_context.py` (`build_ssl_context()`), reused by both EDDN and EDSM.
 
 ## Coding Rules
 - Always write tests before (or alongside) implementing a change — prefer delegating test creation to a subagent or specialized agent when available
@@ -44,8 +53,8 @@ The watcher fans every parsed event out to a `list[StreamConsumer]` (`src/module
 
 ## Key Files
 - `main.py` — Plugin entry point, wires all backend modules
-- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics, activity_log, constants, signal_batcher, session_stats, stream_consumer)
-- `src/api.ts` — Defines all 13 callable frontend→backend methods
+- `src/modules/` — Python backend modules (settings, path_finder, parser, validator, submitter, watcher, diagnostics, activity_log, constants, signal_batcher, session_stats, stream_consumer, ssl_context, forwarders/edsm, forwarders/edsm_client)
+- `src/api.ts` — Defines the callable frontend→backend methods
 - `src/types.d.ts` — TypeScript type definitions for callable results and emitted event payloads
 - `src/index.tsx` — Frontend: game lifecycle + plugin registration
 - `src/Content.tsx` — Frontend: UI panel (status, configuration, recent errors, recent activity, diagnostics)
