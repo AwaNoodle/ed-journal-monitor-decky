@@ -1,3 +1,7 @@
+## Purpose
+
+Detect and report whether Elite Dangerous is running and the journal watcher's status.
+
 ## Requirements
 
 ### Requirement: Backend tracks ED running state

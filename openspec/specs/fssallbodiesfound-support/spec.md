@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Submit FSSAllBodiesFound journal events to EDDN via the fssallbodiesfound/1 schema.
+
+## Requirements
 
 ### Requirement: Parse FSSAllBodiesFound journal events
 The backend SHALL recognize `FSSAllBodiesFound` as a reportable journal event and process it through the dedicated schema routing path.

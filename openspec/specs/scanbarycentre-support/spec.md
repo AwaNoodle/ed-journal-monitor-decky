@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Submit ScanBaryCentre journal events to EDDN via the scanbarycentre/1 schema.
+
+## Requirements
 
 ### Requirement: Parse ScanBaryCentre journal events
 The backend SHALL recognize `ScanBaryCentre` as a reportable journal event and route it through the dedicated schema path.

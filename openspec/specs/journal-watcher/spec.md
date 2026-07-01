@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Watch the Elite Dangerous journal directory for new events and route them for submission.
+
+## Requirements
 
 ### Requirement: Start watcher when ED launches
 The backend SHALL begin monitoring the journal directory when instructed by the frontend (triggered by ED game start).

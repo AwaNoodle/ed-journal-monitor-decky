@@ -1,3 +1,7 @@
+## Purpose
+
+React to Elite Dangerous starting/stopping and system suspend/resume to start and stop journal monitoring.
+
 ## Requirements
 
 ### Requirement: Detect Elite Dangerous start

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Package logs, settings, and runtime state into a downloadable diagnostic bundle for offline troubleshooting.
+
+## Requirements
 
 ### Requirement: Create diagnostic bundle
 The system SHALL provide a `create_diagnostics()` callable that packages plugin log, settings, runtime state, and metadata into a zip file.

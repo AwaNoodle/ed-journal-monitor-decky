@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Locate the Elite Dangerous journal directory automatically, with a manual override.
+
+## Requirements
 
 ### Requirement: Parse Steam library folders configuration
 The backend SHALL parse `~/.local/share/Steam/config/libraryfolders.vdf` to discover all Steam library paths on the system.

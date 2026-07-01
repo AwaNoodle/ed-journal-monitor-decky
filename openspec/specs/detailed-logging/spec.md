@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Let the user toggle verbose (DEBUG) backend logging for troubleshooting, persisted across restarts.
+
+## Requirements
 
 ### Requirement: Toggle detailed logging
 The system SHALL provide a `set_detailed_logging(enabled)` callable that adjusts the `decky.logger` log level.

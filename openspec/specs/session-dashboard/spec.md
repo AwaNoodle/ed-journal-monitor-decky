@@ -1,3 +1,7 @@
+## Purpose
+
+Show a live, player-facing summary of the current Elite Dangerous game launch in the panel.
+
 ## Requirements
 
 ### Requirement: Session stats accumulation

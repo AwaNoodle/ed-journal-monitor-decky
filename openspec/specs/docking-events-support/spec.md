@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Submit DockingGranted and DockingDenied journal events to EDDN via their dedicated schemas.
+
+## Requirements
 
 ### Requirement: Parse DockingGranted and DockingDenied journal events
 The backend SHALL recognize `DockingGranted` and `DockingDenied` as reportable journal events and route them through the dedicated schema path.

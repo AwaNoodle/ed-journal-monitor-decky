@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Submit FSSBodySignals journal events to EDDN via the fssbodysignals/1 schema.
+
+## Requirements
 
 ### Requirement: Parse FSSBodySignals journal events
 The backend SHALL recognize `FSSBodySignals` as a reportable journal event and route it through the dedicated schema path.
