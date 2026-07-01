@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-01
+
 ### Added
 
-- **EDSM forwarding**: a second submission target that forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile, alongside (and isolated from) EDDN. Enter your EDSM commander name and API key in the new **EDSM** panel section to enable it — uploads are **off by default** because EDSM submissions are identifiable (tied to your named account), unlike anonymous EDDN. Includes EDSM's discard-list filter, batched submission with size/time/shutdown flush, `msgnum`/rate-limit handling, and a compact EDSM status block surfacing the last response message. The EDSM section shows a live status line (inactive / enabled / active), confirms when credentials are saved, and lets you update the commander name without re-pasting the key. Saving credentials while Elite Dangerous is already running activates EDSM immediately (no relaunch needed). New `set_edsm_credentials`/`get_edsm_credentials` callables and `edsm_commander_name`/`edsm_api_key` settings.
+- **EDSM forwarding**: a second submission target that forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile, alongside (and isolated from) EDDN. Enter your EDSM commander name and API key in the new **EDSM** panel section to enable it — uploads are **off by default** because EDSM submissions are identifiable (tied to your named account), unlike anonymous EDDN. Includes EDSM's discard-list filter, batched submission with size/time/shutdown flush, and `msgnum`/rate-limit handling. The EDSM section shows a live status line (inactive / enabled / active), confirms when credentials are saved, and lets you update the commander name without re-pasting the key; EDSM failures surface per-event in Recent Errors. Saving credentials while Elite Dangerous is already running activates EDSM immediately (no relaunch needed). New `set_edsm_credentials`/`get_edsm_credentials` callables and `edsm_commander_name`/`edsm_api_key` settings.
 - **Target-tagged activity log**: Recent Activity and Recent Errors now show which target (EDDN / EDSM) each event was sent to, with a compact target badge on every row. EDSM events are recorded per-event when a batch is confirmed, and EDSM failures (e.g. a bad-key `203`) surface in Recent Errors. Because EDDN (a narrow allow-list) and EDSM (a broad deny-list) carry different, only-partially-overlapping streams, an event sent to both appears as one EDDN row and one EDSM row.
 
 ### Changed
