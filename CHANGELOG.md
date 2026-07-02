@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal
+
+- The Release workflow now triggers on tag push (`v*`): pushing a tag lints, tests, packages, creates the GitHub Release with notes from the matching `CHANGELOG.md` section, and attaches the built `.zip`. Previously the GitHub Release had to be created by hand. The manually-published-Release path is still supported.
+
 ## [0.5.0] - 2026-07-01
 
 ### Added

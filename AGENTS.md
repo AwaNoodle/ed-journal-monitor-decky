@@ -42,6 +42,7 @@ Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm":
 - After implementing any change, update `README.md` if user-facing behavior, features, or supported events have changed
 - After implementing any change, add an entry under `[Unreleased]` in `CHANGELOG.md`
 - When tagging a new release, use `bash scripts/release.sh <version>` (e.g. `bash scripts/release.sh 0.3.0`): it bumps `package.json`, prompts for the `CHANGELOG.md` update (move `[Unreleased]` entries under the new version header with the release date, add a fresh `[Unreleased]` section), commits both, and creates the tag. Never create a tag before bumping `package.json` — Decky displays the version from `package.json`
+- Publishing is automated: `git push --tags` triggers `.github/workflows/release.yml` (on `push: tags: v*`), which lints, tests, packages, **creates the GitHub Release** (notes pulled from the matching `CHANGELOG.md` section), and attaches `ed-journal-monitor-decky-<tag>.zip`. Do not hand-create the GitHub Release for a normal tag push. The workflow also still runs on a manually-published Release (`release: published`) — in that path it skips release creation and only attaches the asset. The Release is created with `GITHUB_TOKEN`, which intentionally does **not** re-trigger the `release: published` job (no double run)
 
 ## Reporting
 - All report and review output (code reviews, diagnostics, analysis, etc.) must be written to the `./reports/` folder

@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [published]
 
@@ -9,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
+    env:
+      # On a tag push this is `github.ref_name` (e.g. v0.6.0); on a manual
+      # GitHub Release it is the release's tag. One var covers both triggers.
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v4
@@ -41,10 +50,24 @@ jobs:
         run: npm run package
 
       - name: Rename zip with version
-        run: mv ed-journal-monitor.zip ed-journal-monitor-decky-${{ github.event.release.tag_name }}.zip
+        run: mv ed-journal-monitor.zip "ed-journal-monitor-decky-${TAG}.zip"
+
+      # On a tag push, create the GitHub Release. Its notes come from the
+      # matching CHANGELOG.md section. A release created here with GITHUB_TOKEN
+      # does NOT re-trigger the `release: published` job, so no double run.
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        run: |
+          version="${TAG#v}"
+          awk -v ver="$version" '
+            $0 ~ ("^## \\[" ver "\\]") { flag = 1; next }
+            flag && /^## \[/ { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${TAG}" > release-notes.md
+          fi
+          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
 
       - name: Upload release asset
-        uses: shogo82148/actions-upload-release-asset@v1
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ed-journal-monitor-decky-${{ github.event.release.tag_name }}.zip
+        run: gh release upload "$TAG" "ed-journal-monitor-decky-${TAG}.zip" --clobber
