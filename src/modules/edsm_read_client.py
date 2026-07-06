@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 EDSM read-side client for public system data (stdlib urllib).
 
@@ -20,6 +18,8 @@ Confirmed field naming from live EDSM responses (captured 2026-07-06):
     There is no separate ``isMapped`` field on this endpoint.
 """
 
+from __future__ import annotations
+
 import json
 import urllib.error
 import urllib.parse
@@ -32,9 +32,10 @@ import decky
 if TYPE_CHECKING:
     import ssl
 
+from src.modules.constants import EDSM_USER_AGENT
+
 EDSM_BODIES_URL = "https://www.edsm.net/api-system-v1/bodies"
 DEFAULT_TIMEOUT = 15  # seconds
-DEFAULT_USER_AGENT = "ed-journal-monitor-decky"
 
 # Status sentinel values
 STATUS_OK = "ok"
@@ -63,7 +64,7 @@ class EdsmReadClient:
         self,
         ssl_context: ssl.SSLContext | None = None,
         timeout: int = DEFAULT_TIMEOUT,
-        user_agent: str = DEFAULT_USER_AGENT,
+        user_agent: str = EDSM_USER_AGENT,
     ) -> None:
         self._ssl_context = ssl_context
         self._timeout = timeout

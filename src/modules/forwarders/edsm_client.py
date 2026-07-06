@@ -32,12 +32,13 @@ if TYPE_CHECKING:
     import ssl
     from collections.abc import Sequence
 
+from src.modules.constants import EDSM_USER_AGENT
+
 EDSM_JOURNAL_URL = "https://www.edsm.net/api-journal-v1"
 EDSM_DISCARD_URL = "https://www.edsm.net/api-journal-v1/discard"
 DEFAULT_TIMEOUT = 20  # seconds (matches EDMC)
 # EDSM sits behind Cloudflare, which rejects the default Python-urllib
 # User-Agent with HTTP 403. A non-default, identifiable UA is required.
-DEFAULT_USER_AGENT = "ed-journal-monitor-decky"
 
 # msgnum response classes (hundreds digit) and HTTP boundaries.
 _MSGNUM_OK_CLASS = 1  # 1xx — accepted
@@ -96,7 +97,7 @@ class EdsmClient:
         self,
         ssl_context: ssl.SSLContext | None = None,
         timeout: int = DEFAULT_TIMEOUT,
-        user_agent: str = DEFAULT_USER_AGENT,
+        user_agent: str = EDSM_USER_AGENT,
     ) -> None:
         self._ssl_context = ssl_context
         self._timeout = timeout

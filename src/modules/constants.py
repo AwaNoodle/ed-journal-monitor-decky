@@ -6,6 +6,9 @@ from typing import Literal
 SOFTWARE_NAME = "ED Journal Monitor Decky"
 SOFTWARE_VERSION = "0.1.0"
 
+# User-Agent sent to EDSM (Cloudflare rejects urllib's default UA)
+EDSM_USER_AGENT = "ed-journal-monitor-decky"
+
 # Submission targets (used to tag activity log entries and per-target stats).
 # Adding a further target (e.g. Inara) is a one-line addition here plus the
 # consumer's `name`.
