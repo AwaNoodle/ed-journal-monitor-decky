@@ -38,6 +38,6 @@
 ## 8. Verification & docs
 
 - [x] 8.1 Run full pytest suite + lint/typecheck; all green
-- [ ] 8.2 Manually verify on device (or with captured journals): arrival produces a chip, toggle-off makes no EDSM calls, EDDN/EDSM-write unaffected on read failure
+- [x] 8.2 Manually verify on device (or with captured journals): arrival produces a chip, toggle-off makes no EDSM calls, EDDN/EDSM-write unaffected on read failure
 - [x] 8.3 Update `README.md`, `CHANGELOG.md` (`[Unreleased]`), and `AGENTS.md` for the new read path, setting, and UI
-- [ ] 8.4 Open a PR; merge via squash-and-rebase
+- [x] 8.4 Open a PR; merge via squash-and-rebase

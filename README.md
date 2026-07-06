@@ -12,7 +12,7 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 - **Auto-discovery**: Finds the ED journal directory by scanning Steam's library configuration — no manual setup required for Steam installs
 - **EDDN submission**: Validates and submits journal/1 events plus Market/Outfitting/Shipyard auxiliary schemas to EDDN
 - **EDSM forwarding (opt-in)**: Optionally forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile under your own credentials, alongside and fully isolated from EDDN. Off by default — EDSM uploads are identifiable (tied to your named account), so you enable it by entering an API key
-- **EDSM worth-scanning lookup (opt-in)**: On arrival in a system, looks up EDSM's public body data and displays a glanceable chip in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). Labelled as EDSM-sourced; no API key required. Off by default; enable it with the **Auto-lookup worth scanning** toggle in the EDSM section
+- **EDSM worth-scanning lookup (opt-in)**: On arrival in a system, looks up EDSM's public body data and displays a glanceable chip in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). Labelled as EDSM-sourced; no API key required. Off by default; enable it with the **Enable EDSM lookup** toggle in the Status section
 - **No root access required**: All operations use user-accessible filesystem paths
 - **Steam Deck optimized**: Lightweight polling-based watcher (default 10s interval), minimal resource usage
 - **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
@@ -44,10 +44,10 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 The Decky plugin panel has seven sections:
 
-- **Session**: A live, player-facing summary of the current ED game launch — a hero location line (current system) with an optional EDSM worth-scanning chip (green/yellow/red, EDSM-attributed), above a 2×2 grid of counters (jumps, distance in ly, bodies scanned, first discoveries). Resets on each game launch; shows a neutral empty state before any events are seen. The worth-scanning chip only appears when EDSM auto-lookups are enabled.
-- **Status**: Enabled toggle, ED status (running/not running), Journal status (watching/found/not found), **per-target upload counts** (✅ success / ❌ failed for each of EDDN and EDSM), and a compact EDSM status block (counts + last response message, or an inactive notice when no API key is set)
+- **Session**: A live, player-facing summary of the current ED game launch — a 2×2 grid of counters (jumps, distance in ly, bodies scanned, first discoveries), then a **Current location** block showing the current system and an optional EDSM worth-scanning chip (green/yellow/red, EDSM-attributed). Resets on each game launch; shows a neutral empty state before any events are seen. The worth-scanning chip only appears when EDSM lookup is enabled.
+- **Status**: **Watch journal** toggle, **Enable EDSM lookup** toggle (public API, no key needed), ED status (running/not running), Journal status (watching/found/not found), **per-target upload counts** (✅ success / ❌ failed for each of EDDN and EDSM), and a compact EDSM status block (counts + last response message, or an inactive notice when no API key is set)
 - **Configuration**: Journal path display, path source (auto/manual), re-scan button, manual journal path input, EDDN uploader ID input, notification when no uploader ID is set
-- **EDSM**: EDSM commander name + API key inputs (with an identifiability/consent notice and a link to where the key is generated); **Auto-lookup worth scanning** toggle (public data, no API key needed); and an inactive notice when no API key is set
+- **EDSM**: EDSM commander name + API key inputs (with an identifiability/consent notice and a link to where the key is generated), and an inactive notice when no API key is set
 - **Recent Errors**: Last 5 failed uploads with event type, timestamp, error classification, error message, and HTTP status
 - **Recent Activity**: Last 10 upload attempts with success/failure indicator, event type, and timestamp
 - **Diagnostics**: Detailed logging toggle, create diagnostic bundle button, bundle result (path + size)

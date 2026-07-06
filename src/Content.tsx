@@ -348,20 +348,23 @@ const Content = (): JSX.Element => {
     return (
       <>
         <PanelSectionRow>
-          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
-            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Location</span>
-            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
-              {sessionStats.star_system || "Unknown"}
-            </span>
-            {getWorthScanningChip()}
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
           <div style={{ display: "flex", flexWrap: "wrap", width: "100%" }}>
             {renderCounter("Jumps", String(sessionStats.jumps))}
             {renderCounter("Distance (ly)", sessionStats.distance_ly.toFixed(1))}
             {renderCounter("Bodies Scanned", String(sessionStats.bodies_scanned))}
             {renderCounter("First Discoveries", String(sessionStats.first_discoveries))}
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Current location</span>
+            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+              {sessionStats.star_system || "Unknown"}
+            </span>
+            {getWorthScanningChip()}
           </div>
         </PanelSectionRow>
       </>
@@ -377,9 +380,16 @@ const Content = (): JSX.Element => {
       <PanelSection title="Status">
         <PanelSectionRow>
           <ToggleField
-            label="Enabled"
+            label="Watch journal"
             checked={enabled}
             onChange={(state: boolean): void => { void handleToggle(state); }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Enable EDSM lookup"
+            checked={edsmLookupsEnabled}
+            onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
           />
         </PanelSectionRow>
         <PanelSectionRow>
@@ -486,14 +496,6 @@ const Content = (): JSX.Element => {
           <Field label="Status">
             {getEdsmStatusText()}
           </Field>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Auto-lookup worth scanning"
-            description="Checks EDSM's public system data on arrival. No API key needed."
-            checked={edsmLookupsEnabled}
-            onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
-          />
         </PanelSectionRow>
         <PanelSectionRow>
           <TextField
