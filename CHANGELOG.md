@@ -10,9 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **EDSM worth-scanning lookup**: on arrival in a system (`FSDJump`/`Location`), the plugin can now fetch EDSM's public system body data and display a glanceable **worth-scanning chip** in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). The chip is labelled as EDSM-sourced and updates live on each arrival. A new **Enable EDSM lookup** toggle in the Status section controls this feature; it is **off by default** and independent of the EDSM API key (the system endpoints are public and require no key). Lookups are fully isolated from EDDN and EDSM-write: a read failure or EDSM outage never affects submission. Results are cached per-system (4 h TTL) so re-jumping to a known system makes no new request. New `set_edsm_lookups_enabled` callable and `edsm_lookups_enabled` setting.
 
+### Fixed
+
+- **EDSM lookup staleness guard**: if the player jumps to a new system while a previous lookup is still in flight, the stale result is now silently discarded instead of overwriting the current system's verdict.
+- **EDSM unavailable result not cached**: `STATUS_UNAVAILABLE` results (network error / timeout) are no longer written to the per-session cache, so the next arrival in the same system retries the lookup rather than sticking on a transient failure.
+
 ### Internal
 
 - The Release workflow now triggers on tag push (`v*`): pushing a tag lints, tests, packages, creates the GitHub Release with notes from the matching `CHANGELOG.md` section, and attaches the built `.zip`. Previously the GitHub Release had to be created by hand. The manually-published-Release path is still supported.
+- Module docstring in `edsm_lookup_consumer.py` moved to before `from __future__ import annotations` (PEP 257 / Python convention).
 
 ## [0.5.0] - 2026-07-01
 

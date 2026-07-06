@@ -181,6 +181,82 @@ class TestNonBlocking:
             pytest.fail("observe() propagated a lookup exception")
 
 
+class TestStalenessGuard:
+    def test_stale_lookup_does_not_update_verdict(self):
+        """When _last_system changes before a lookup completes, its verdict is dropped."""
+        from src.modules.edsm_read_client import STATUS_OK, SystemBodiesResult
+
+        verdicts: list[tuple[str, str | None]] = []
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_client = MagicMock()
+        # Simulate Sol returning a red result
+        mock_client.get_system_bodies.return_value = SystemBodiesResult(
+            status=STATUS_OK,
+            system_name="Sol",
+            bodies=[{"discovery": {"commander": "Jameson"}}],
+            body_count=1,
+        )
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_client,
+            on_verdict=lambda s, v: verdicts.append((s, v)),
+        )
+
+        # Player is now in Maia (jumped away while Sol lookup was in flight)
+        consumer._last_system = "Maia"
+
+        # Sol's lookup result arrives (sync path simulates a completed async task)
+        consumer._do_lookup_sync("Sol")
+
+        # Verdict must be dropped — Sol is no longer the current system
+        assert verdicts == []
+
+
+class TestUnavailableResult:
+    def test_unavailable_result_is_not_cached(self):
+        """STATUS_UNAVAILABLE must not be written to the cache (so retry is possible)."""
+        from src.modules.edsm_read_client import STATUS_UNAVAILABLE, SystemBodiesResult
+
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_client = MagicMock()
+        mock_client.get_system_bodies.return_value = SystemBodiesResult(
+            status=STATUS_UNAVAILABLE, system_name="Sol"
+        )
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None  # cache miss
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_client,
+            cache=mock_cache,
+        )
+        consumer._last_system = "Sol"  # Sol is current
+
+        consumer._do_lookup_sync("Sol")
+
+        mock_cache.set.assert_not_called()
+
+    def test_unavailable_result_does_not_emit_verdict(self):
+        """STATUS_UNAVAILABLE must not call on_verdict (chip stays absent, not stuck)."""
+        from src.modules.edsm_read_client import STATUS_UNAVAILABLE, SystemBodiesResult
+
+        verdicts: list[tuple[str, str | None]] = []
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_client = MagicMock()
+        mock_client.get_system_bodies.return_value = SystemBodiesResult(
+            status=STATUS_UNAVAILABLE, system_name="Sol"
+        )
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_client,
+            on_verdict=lambda s, v: verdicts.append((s, v)),
+        )
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        assert verdicts == []
+
+
 class TestSessionLifecycle:
     def test_on_session_start_clears_dedup_state(self, consumer):
         """Starting a new session resets the 'last system' so first arrival fires again."""

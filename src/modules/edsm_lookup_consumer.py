@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 EDSM arrival-triggered system lookup consumer.
 
@@ -18,11 +16,13 @@ Design principles:
   any network call.
 """
 
+from __future__ import annotations
+
 import asyncio
 from typing import TYPE_CHECKING, Callable
 
 import decky
-from src.modules.edsm_read_client import EdsmReadClient
+from src.modules.edsm_read_client import STATUS_UNAVAILABLE, EdsmReadClient
 from src.modules.edsm_system_cache import SystemLookupCache
 from src.modules.edsm_worth_scanning import derive_verdict
 from src.modules.ssl_context import build_ssl_context
@@ -108,8 +108,13 @@ class EdsmLookupConsumer:
             result = cached
         else:
             result = self._client.get_system_bodies(system_name)
-            self._cache.set(system_name, result)
+            if result.status != STATUS_UNAVAILABLE:
+                self._cache.set(system_name, result)
         verdict = derive_verdict(result)
+        if verdict is None:
+            return
+        if system_name != self._last_system:
+            return
         self._emit_verdict(system_name, verdict)
 
     async def _lookup_async(self, system_name: str) -> None:
@@ -123,8 +128,13 @@ class EdsmLookupConsumer:
                 result = await loop.run_in_executor(
                     None, self._client.get_system_bodies, system_name
                 )
-                self._cache.set(system_name, result)
+                if result.status != STATUS_UNAVAILABLE:
+                    self._cache.set(system_name, result)
             verdict = derive_verdict(result)
+            if verdict is None:
+                return
+            if system_name != self._last_system:
+                return
             self._emit_verdict(system_name, verdict)
             await decky.emit(VERDICT_EVENT, {
                 "system": system_name,
