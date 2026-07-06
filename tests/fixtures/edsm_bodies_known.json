@@ -1,0 +1,151 @@
+{
+  "id": 7,
+  "id64": 24860210308521,
+  "name": "Wolf 359",
+  "url": "https://www.edsm.net/en/system/bodies/id/7/name/Wolf+359",
+  "bodyCount": 3,
+  "bodies": [
+    {
+      "id": 10947,
+      "id64": 24860210308521,
+      "bodyId": 0,
+      "name": "Wolf 359",
+      "discovery": {
+        "commander": "kaiidth",
+        "date": "2017-09-27 08:55:09"
+      },
+      "type": "Star",
+      "subType": "M (Red dwarf) Star",
+      "parents": null,
+      "distanceToArrival": 0,
+      "isMainStar": true,
+      "isScoopable": true,
+      "age": 10064,
+      "spectralClass": "M6",
+      "luminosity": "V",
+      "absoluteMagnitude": 10.203293,
+      "solarMasses": 0.269531,
+      "solarRadius": 0.435333245147376,
+      "surfaceTemperature": 2541,
+      "orbitalPeriod": null,
+      "semiMajorAxis": null,
+      "orbitalEccentricity": null,
+      "orbitalInclination": null,
+      "argOfPeriapsis": null,
+      "rotationalPeriod": 1.412329893287037,
+      "rotationalPeriodTidallyLocked": false,
+      "axialTilt": -0.231873,
+      "updateTime": "2021-01-11 03:29:50"
+    },
+    {
+      "id": 3427,
+      "id64": 36053657229272489,
+      "bodyId": 1,
+      "name": "Campbell's Claim",
+      "discovery": {
+        "commander": "kaiidth",
+        "date": "2017-09-27 08:55:09"
+      },
+      "type": "Planet",
+      "subType": "Rocky body",
+      "parents": [
+        {
+          "Star": 0
+        }
+      ],
+      "distanceToArrival": 53,
+      "isLandable": true,
+      "gravity": 0.37634389714593763,
+      "earthMasses": 0.07,
+      "radius": 2750.6865,
+      "surfaceTemperature": 222,
+      "surfacePressure": null,
+      "volcanismType": "No volcanism",
+      "atmosphereType": "No atmosphere",
+      "atmosphereComposition": null,
+      "solidComposition": {
+        "Rock": 80,
+        "Metal": 20,
+        "Ice": 0
+      },
+      "terraformingState": "Not terraformable",
+      "orbitalPeriod": 28.999999717430555,
+      "semiMajorAxis": 0.10600007023302505,
+      "orbitalEccentricity": 0,
+      "orbitalInclination": 358.299986,
+      "argOfPeriapsis": 220.030354,
+      "rotationalPeriod": 24.27771298790509,
+      "rotationalPeriodTidallyLocked": false,
+      "axialTilt": 0.249679,
+      "materials": {
+        "Iron": 19.91,
+        "Sulphur": 16.38,
+        "Nickel": 15.06,
+        "Carbon": 13.78,
+        "Chromium": 8.95,
+        "Phosphorus": 8.82,
+        "Manganese": 8.22,
+        "Zinc": 5.41,
+        "Niobium": 1.36,
+        "Tungsten": 1.09,
+        "Antimony": 1.02
+      },
+      "updateTime": "2026-07-05 02:50:38"
+    },
+    {
+      "id": 14542,
+      "id64": 72082454248236457,
+      "bodyId": 2,
+      "name": "Camp Donalds",
+      "discovery": {
+        "commander": "kaiidth",
+        "date": "2017-09-27 08:55:09"
+      },
+      "type": "Planet",
+      "subType": "Rocky body",
+      "parents": [
+        {
+          "Star": 0
+        }
+      ],
+      "distanceToArrival": 99,
+      "isLandable": true,
+      "gravity": 0.2420405793914885,
+      "earthMasses": 0.02,
+      "radius": 1833.392375,
+      "surfaceTemperature": 163,
+      "surfacePressure": null,
+      "volcanismType": "No volcanism",
+      "atmosphereType": "No atmosphere",
+      "atmosphereComposition": null,
+      "solidComposition": {
+        "Rock": 80,
+        "Metal": 20,
+        "Ice": 0
+      },
+      "terraformingState": "Not terraformable",
+      "orbitalPeriod": 74.9999995308912,
+      "semiMajorAxis": 0.198000136903359,
+      "orbitalEccentricity": 0,
+      "orbitalInclination": 6.7,
+      "argOfPeriapsis": 240.25467,
+      "rotationalPeriod": 61.97932327636573,
+      "rotationalPeriodTidallyLocked": true,
+      "axialTilt": -0.268449,
+      "materials": {
+        "Iron": 20.73,
+        "Sulphur": 17.06,
+        "Nickel": 15.68,
+        "Carbon": 14.34,
+        "Phosphorus": 9.18,
+        "Manganese": 8.56,
+        "Zinc": 5.63,
+        "Vanadium": 5.09,
+        "Molybdenum": 1.35,
+        "Tin": 1.31,
+        "Antimony": 1.07
+      },
+      "updateTime": "2026-07-05 02:52:27"
+    }
+  ]
+}

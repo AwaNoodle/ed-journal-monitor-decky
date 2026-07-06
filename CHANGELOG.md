@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **EDSM worth-scanning lookup**: on arrival in a system (`FSDJump`/`Location`), the plugin can now fetch EDSM's public system body data and display a glanceable **worth-scanning chip** in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). The chip is labelled as EDSM-sourced and updates live on each arrival. A new **Auto-lookup worth scanning** toggle in the EDSM configuration section controls this feature; it is **off by default** and independent of the EDSM API key (the system endpoints are public and require no key). Lookups are fully isolated from EDDN and EDSM-write: a read failure or EDSM outage never affects submission. Results are cached per-system (4 h TTL) so re-jumping to a known system makes no new request. New `set_edsm_lookups_enabled` callable and `edsm_lookups_enabled` setting.
+
 ### Internal
 
 - The Release workflow now triggers on tag push (`v*`): pushing a tag lints, tests, packages, creates the GitHub Release with notes from the matching `CHANGELOG.md` section, and attaches the built `.zip`. Previously the GitHub Release had to be created by hand. The manually-published-Release path is still supported.
