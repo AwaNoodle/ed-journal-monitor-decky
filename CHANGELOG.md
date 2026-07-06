@@ -20,8 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Internal
 
 - The Release workflow now triggers on tag push (`v*`): pushing a tag lints, tests, packages, creates the GitHub Release with notes from the matching `CHANGELOG.md` section, and attaches the built `.zip`. Previously the GitHub Release had to be created by hand. The manually-published-Release path is still supported.
-- Module docstring in `edsm_lookup_consumer.py` moved to before `from __future__ import annotations` (PEP 257 / Python convention).
-- `EDSM_USER_AGENT` centralised in `constants.py`; both EDSM clients (`edsm_read_client.py` and `forwarders/edsm_client.py`) now import it instead of each defining an independent copy. Module docstring in `edsm_read_client.py` also moved to before `from __future__ import annotations`.
+- Module docstrings in `edsm_lookup_consumer.py`, `edsm_read_client.py`, and `edsm_system_cache.py` moved to before `from __future__ import annotations` (PEP 257 / Python convention).
+- `EDSM_USER_AGENT` centralised in `constants.py`; both EDSM clients (`edsm_read_client.py` and `forwarders/edsm_client.py`) now import it instead of each defining an independent copy.
 
 ## [0.5.0] - 2026-07-01
 

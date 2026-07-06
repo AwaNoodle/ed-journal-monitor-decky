@@ -83,3 +83,9 @@ class TestCacheOverwrite:
         cache.set("Maia", r_maia)
         assert cache.get("Sol") is r_sol
         assert cache.get("Maia") is r_maia
+
+
+def test_module_docstring_is_accessible():
+    import src.modules.edsm_system_cache as m
+    assert m.__doc__ is not None
+    assert "TTL" in m.__doc__

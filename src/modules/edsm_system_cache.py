@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Per-system TTL cache for EDSM body-lookup results.
 
@@ -7,6 +5,8 @@ Keyed by system name (exact match, case-sensitive as returned by the journal).
 In-memory only; cleared on restart.  A few hours TTL is appropriate because a
 system's explored state changes slowly.
 """
+
+from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
