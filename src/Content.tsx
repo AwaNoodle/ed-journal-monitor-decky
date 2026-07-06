@@ -110,7 +110,11 @@ const Content = (): JSX.Element => {
     });
 
     const worthScanningListener = addEventListener("edsm_worth_scanning", (data: EdsmWorthScanningEvent): void => {
-      setEdsmWorthScanning(data);
+      if (data.verdict === null) {
+        setEdsmWorthScanning(null);
+      } else {
+        setEdsmWorthScanning(data);
+      }
     });
 
     const sessionListener = addEventListener("session_update", (data: SessionUpdateEvent): void => {
@@ -242,6 +246,9 @@ const Content = (): JSX.Element => {
   const handleEdsmLookupsToggle = async (state: boolean): Promise<void> => {
     await setEdsmLookupsEnabled(state);
     setEdsmLookupsEnabledState(state);
+    if (!state) {
+      setEdsmWorthScanning(null);
+    }
   };
 
   const getWorthScanningChip = (): JSX.Element | null => {

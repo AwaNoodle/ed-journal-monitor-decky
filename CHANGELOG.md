@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **EDSM lookup staleness guard**: if the player jumps to a new system while a previous lookup is still in flight, the stale result is now silently discarded instead of overwriting the current system's verdict.
 - **EDSM unavailable result not cached**: `STATUS_UNAVAILABLE` results (network error / timeout) are no longer written to the per-session cache, so the next arrival in the same system retries the lookup rather than sticking on a transient failure.
+- **Stale worth-scanning chip after ED quits**: `set_ed_running(False)` now clears `_edsm_verdict` and emits an `edsm_worth_scanning` clear event so the chip disappears when the game exits.
+- **Chip persists after EDSM lookup toggle-off**: `set_edsm_lookups_enabled(False)` now clears `_edsm_verdict` and emits a null clear event; the frontend `handleEdsmLookupsToggle` also calls `setEdsmWorthScanning(null)` immediately. The `worthScanningListener` now treats `{verdict: null}` as a clear signal rather than passing it through to the chip renderer.
 
 ### Internal
 

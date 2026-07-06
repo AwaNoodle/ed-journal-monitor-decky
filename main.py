@@ -233,6 +233,9 @@ class Plugin:
     async def set_edsm_lookups_enabled(self, enabled: bool) -> dict:
         """Enable or disable EDSM auto-lookups. Independent of the EDSM API key."""
         await self.settings.set("edsm_lookups_enabled", enabled)
+        if not enabled:
+            self._edsm_verdict = None
+            await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
         return {"success": True}
 
     async def set_detailed_logging(self, enabled: bool) -> dict:
@@ -263,6 +266,9 @@ class Plugin:
                 if callable(start):
                     start()
             await decky.emit("status_update", self._build_target_stats())
+        else:
+            self._edsm_verdict = None
+            await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 

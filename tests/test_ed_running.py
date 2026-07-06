@@ -46,9 +46,10 @@ class TestSetEdRunning:
 
     @pytest.mark.asyncio
     async def test_set_ed_running_false(self):
-        """set_ed_running(false) updates state and emits event."""
+        """set_ed_running(false) updates state, clears verdict, and emits events."""
         plugin = Plugin()
         plugin.ed_running = True
+        plugin._edsm_verdict = {"system": "Sol", "verdict": "green", "source": "edsm"}
         emitted_events = []
 
         async def mock_emit(event, data):
@@ -59,8 +60,11 @@ class TestSetEdRunning:
 
         assert result == {"success": True}
         assert plugin.ed_running is False
-        assert len(emitted_events) == 1
-        assert emitted_events[0] == ("ed_state_change", {"ed_running": False})
+        assert plugin._edsm_verdict is None
+        # Emits edsm_worth_scanning clear then ed_state_change
+        assert len(emitted_events) == 2
+        assert emitted_events[0] == ("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+        assert emitted_events[1] == ("ed_state_change", {"ed_running": False})
 
     @pytest.mark.asyncio
     async def test_set_ed_running_noop_on_same_state(self):
@@ -98,7 +102,7 @@ class TestSetEdRunning:
 
     @pytest.mark.asyncio
     async def test_set_ed_running_state_transition_true_false(self):
-        """State transition true -> false emits event."""
+        """State transition true -> false emits edsm clear then ed_state_change."""
         plugin = Plugin()
         plugin.ed_running = True
         emitted_events = []
@@ -109,8 +113,9 @@ class TestSetEdRunning:
         with patch("decky.emit", side_effect=mock_emit):
             await plugin.set_ed_running(False)
 
-        assert len(emitted_events) == 1
-        assert emitted_events[0] == ("ed_state_change", {"ed_running": False})
+        assert len(emitted_events) == 2
+        assert emitted_events[0] == ("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+        assert emitted_events[1] == ("ed_state_change", {"ed_running": False})
 
     @pytest.mark.asyncio
     async def test_set_ed_running_true_resets_submitter_stats(self):

@@ -102,8 +102,9 @@ interface FindPathResult {
 
 // Worth-scanning verdict for the current system, sourced from EDSM public data.
 // null verdict = neutral (disabled, in-flight, or lookup failed).
+// system is null when verdict is null (clear event emitted on ED stop / toggle-off).
 interface EdsmWorthScanningVerdict {
-  system: string;
+  system: string | null;
   verdict: "green" | "yellow" | "red" | null;
   source: "edsm";
 }
