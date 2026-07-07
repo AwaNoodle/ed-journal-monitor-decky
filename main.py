@@ -236,6 +236,11 @@ class Plugin:
         if not enabled:
             self._edsm_verdict = None
             await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+        else:
+            for consumer in self.consumers:
+                if isinstance(consumer, EdsmLookupConsumer):
+                    consumer.clear_last_system()
+                    break
         return {"success": True}
 
     async def set_detailed_logging(self, enabled: bool) -> dict:

@@ -151,6 +151,31 @@ class TestDisabledToggle:
 
         mock_client.get_system_bodies.assert_not_called()
 
+    def test_clear_last_system_resets_dedup_state(self):
+        """clear_last_system() must make the next arrival fire a fresh lookup."""
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_client = MagicMock()
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_client)
+
+        # Player arrived in Sol, lookup fired, dedup set
+        consumer._last_system = "Sol"
+
+        # Now call clear_last_system (simulates re-enable)
+        consumer.clear_last_system()
+
+        # A fresh FSDJump/Location for Sol should fire a new lookup
+        with patch.object(consumer, "_fire_lookup") as mock_fire:
+            consumer.observe(
+                ParsedEvent(
+                    raw={"event": "FSDJump", "StarSystem": "Sol", "timestamp": "2026-01-01T00:00:00Z"},
+                    event_type="FSDJump",
+                    timestamp="2026-01-01T00:00:00Z",
+                ),
+                None,
+            )
+
+        mock_fire.assert_called_once_with("Sol")
+
 
 class TestNonBlocking:
     def test_observe_does_not_await_lookup(self, consumer):
