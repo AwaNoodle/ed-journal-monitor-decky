@@ -88,6 +88,7 @@ class Plugin:
         self.edsm_lookup = EdsmLookupConsumer(
             settings=self.settings,
             on_verdict=self._on_edsm_verdict,
+            on_value=self._on_edsm_value,
         )
         self.consumers = [self.session_stats, self.edsm, self.edsm_lookup]
         signal_batcher = SignalBatcher()
@@ -235,7 +236,10 @@ class Plugin:
         await self.settings.set("edsm_lookups_enabled", enabled)
         if not enabled:
             self._edsm_verdict = None
-            await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+            await decky.emit("edsm_worth_scanning", {
+                "verdict": None, "system": None, "source": "edsm",
+                "totalValue": None, "priorityBodies": [],
+            })
         else:
             for consumer in self.consumers:
                 if isinstance(consumer, EdsmLookupConsumer):
@@ -273,7 +277,10 @@ class Plugin:
             await decky.emit("status_update", self._build_target_stats())
         else:
             self._edsm_verdict = None
-            await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+            await decky.emit("edsm_worth_scanning", {
+                "verdict": None, "system": None, "source": "edsm",
+                "totalValue": None, "priorityBodies": [],
+            })
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 
@@ -317,6 +324,20 @@ class Plugin:
         """Called by the lookup consumer when a verdict is ready.  Stores it for
         get_status() rehydration and schedules a frontend emit."""
         self._edsm_verdict = {"system": system_name, "verdict": verdict, "source": "edsm"}
+
+    def _on_edsm_value(self, system_name: str, value_payload: dict | None) -> None:
+        """Called by the lookup consumer when a value summary is ready (or
+        unavailable). Merges totalValue/priorityBodies onto the verdict already
+        stored for the same system by _on_edsm_verdict, which the lookup
+        consumer always calls first within the same lookup pass."""
+        if self._edsm_verdict is None or self._edsm_verdict.get("system") != system_name:
+            return
+        if value_payload is None:
+            self._edsm_verdict["totalValue"] = None
+            self._edsm_verdict["priorityBodies"] = []
+        else:
+            self._edsm_verdict["totalValue"] = value_payload["totalValue"]
+            self._edsm_verdict["priorityBodies"] = value_payload["priorityBodies"]
 
     def _build_target_stats(self) -> dict:
         """Aggregate per-target upload stats by iterating the consumer registry.

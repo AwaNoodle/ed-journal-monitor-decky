@@ -8,7 +8,12 @@ and basic set/get round-trip.
 import time
 from unittest.mock import patch
 
-from src.modules.edsm_read_client import STATUS_OK, STATUS_UNKNOWN, SystemBodiesResult
+from src.modules.edsm_read_client import (
+    STATUS_OK,
+    STATUS_UNKNOWN,
+    SystemBodiesResult,
+    SystemValueResult,
+)
 from src.modules.edsm_system_cache import SystemLookupCache
 
 
@@ -18,6 +23,10 @@ def _ok_result(system_name: str) -> SystemBodiesResult:
 
 def _unknown_result(system_name: str) -> SystemBodiesResult:
     return SystemBodiesResult(status=STATUS_UNKNOWN, system_name=system_name)
+
+
+def _ok_value_result(system_name: str) -> SystemValueResult:
+    return SystemValueResult(status=STATUS_OK, system_name=system_name, total_value=1000, valuable_bodies=[])
 
 
 class TestCacheHit:
@@ -89,3 +98,36 @@ def test_module_docstring_is_accessible():
     import src.modules.edsm_system_cache as m
     assert m.__doc__ is not None
     assert "TTL" in m.__doc__
+
+
+class TestValueCache:
+    """The value cache is a parallel store on the same instance/TTL as bodies."""
+
+    def test_get_value_returns_cached_result_within_ttl(self):
+        cache = SystemLookupCache(ttl_seconds=3600)
+        result = _ok_value_result("Sol")
+        cache.set_value("Sol", result)
+        assert cache.get_value("Sol") is result
+
+    def test_get_value_returns_none_for_unknown_key(self):
+        cache = SystemLookupCache(ttl_seconds=3600)
+        assert cache.get_value("Nonexistent System") is None
+
+    def test_get_value_returns_none_after_ttl_expiry(self):
+        cache = SystemLookupCache(ttl_seconds=60)
+        result = _ok_value_result("Sol")
+        cache.set_value("Sol", result)
+        with patch("src.modules.edsm_system_cache.time.monotonic", return_value=time.monotonic() + 61):
+            assert cache.get_value("Sol") is None
+
+    def test_value_cache_independent_of_bodies_cache(self):
+        """Bodies and value entries for the same system are stored independently."""
+        cache = SystemLookupCache(ttl_seconds=3600)
+        cache.set("Sol", _ok_result("Sol"))
+        assert cache.get_value("Sol") is None
+
+    def test_clear_discards_value_entries(self):
+        cache = SystemLookupCache(ttl_seconds=3600)
+        cache.set_value("Sol", _ok_value_result("Sol"))
+        cache.clear()
+        assert cache.get_value("Sol") is None

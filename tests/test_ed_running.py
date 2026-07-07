@@ -63,7 +63,10 @@ class TestSetEdRunning:
         assert plugin._edsm_verdict is None
         # Emits edsm_worth_scanning clear then ed_state_change
         assert len(emitted_events) == 2
-        assert emitted_events[0] == ("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+        assert emitted_events[0] == ("edsm_worth_scanning", {
+            "verdict": None, "system": None, "source": "edsm",
+            "totalValue": None, "priorityBodies": [],
+        })
         assert emitted_events[1] == ("ed_state_change", {"ed_running": False})
 
     @pytest.mark.asyncio
@@ -114,7 +117,10 @@ class TestSetEdRunning:
             await plugin.set_ed_running(False)
 
         assert len(emitted_events) == 2
-        assert emitted_events[0] == ("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+        assert emitted_events[0] == ("edsm_worth_scanning", {
+            "verdict": None, "system": None, "source": "edsm",
+            "totalValue": None, "priorityBodies": [],
+        })
         assert emitted_events[1] == ("ed_state_change", {"ed_running": False})
 
     @pytest.mark.asyncio
