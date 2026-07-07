@@ -151,30 +151,41 @@ class TestDisabledToggle:
 
         mock_client.get_system_bodies.assert_not_called()
 
-    def test_clear_last_system_resets_dedup_state(self):
-        """clear_last_system() must make the next arrival fire a fresh lookup."""
+    def test_disabled_consumer_does_not_clear_last_system(self):
+        """When lookups are disabled, _last_system is preserved (force_lookup reads it on re-enable)."""
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": False})
+        mock_client = MagicMock()
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_client)
+        consumer._last_system = "Sol"
+
+        consumer.observe(_event("FSDJump", "Sol"), _session("Sol"))
+
+        assert consumer._last_system == "Sol"
+
+
+class TestForceLookup:
+    def test_force_lookup_fires_lookup_for_named_system(self):
+        """force_lookup triggers a lookup even if system matches _last_system."""
         settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
         mock_client = MagicMock()
         consumer = EdsmLookupConsumer(settings=settings, read_client=mock_client)
+        consumer._last_system = "Sol"  # same system — would be deduped by observe()
 
-        # Player arrived in Sol, lookup fired, dedup set
-        consumer._last_system = "Sol"
-
-        # Now call clear_last_system (simulates re-enable)
-        consumer.clear_last_system()
-
-        # A fresh FSDJump/Location for Sol should fire a new lookup
         with patch.object(consumer, "_fire_lookup") as mock_fire:
-            consumer.observe(
-                ParsedEvent(
-                    raw={"event": "FSDJump", "StarSystem": "Sol", "timestamp": "2026-01-01T00:00:00Z"},
-                    event_type="FSDJump",
-                    timestamp="2026-01-01T00:00:00Z",
-                ),
-                None,
-            )
+            consumer.force_lookup("Sol")
 
         mock_fire.assert_called_once_with("Sol")
+        assert consumer._last_system == "Sol"
+
+    def test_force_lookup_noop_for_empty_system(self):
+        """force_lookup("") must do nothing."""
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        consumer = EdsmLookupConsumer(settings=settings)
+
+        with patch.object(consumer, "_fire_lookup") as mock_fire:
+            consumer.force_lookup("")
+
+        mock_fire.assert_not_called()
 
 
 class TestNonBlocking:

@@ -84,13 +84,16 @@ class EdsmLookupConsumer:
             if not task.done():
                 task.cancel()
 
-    def clear_last_system(self) -> None:
-        """Reset dedup state so the next arrival re-triggers a lookup.
+    def force_lookup(self, system_name: str) -> None:
+        """Trigger a lookup for system_name regardless of dedup state.
 
-        Called by main.py when lookups are re-enabled mid-session, so the
-        player gets a verdict for the system they're already in.
+        Sets _last_system so the result passes the staleness guard, then fires
+        the normal lookup path. No-op if system_name is empty.
         """
-        self._last_system = ""
+        if not system_name:
+            return
+        self._last_system = system_name
+        self._fire_lookup(system_name)
 
     def get_stats(self) -> dict:
         return {}

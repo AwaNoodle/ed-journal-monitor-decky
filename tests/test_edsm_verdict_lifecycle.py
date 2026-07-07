@@ -66,18 +66,19 @@ async def test_edsm_verdict_not_cleared_when_lookups_enabled():
 
 
 @pytest.mark.asyncio
-async def test_re_enabling_lookups_clears_dedup_for_current_system():
-    """Re-enabling lookups must reset the consumer's dedup state."""
+async def test_re_enabling_lookups_fires_lookup_for_current_system():
+    """Re-enabling lookups must trigger a lookup for the system the player is in."""
     plugin = Plugin()
     with patch("decky.emit", new_callable=AsyncMock):
         await plugin._main()
 
-    # Find the lookup consumer
     from src.modules.edsm_lookup_consumer import EdsmLookupConsumer
     lookup_consumer = next(c for c in plugin.consumers if isinstance(c, EdsmLookupConsumer))
-    lookup_consumer._last_system = "Sol"  # was in Sol when lookups were disabled
+    lookup_consumer._last_system = "Sol"  # player is in Sol
 
-    with patch("decky.emit", new_callable=AsyncMock):
+    with patch("decky.emit", new_callable=AsyncMock), \
+         patch.object(lookup_consumer, "_fire_lookup") as mock_fire:
         await plugin.set_edsm_lookups_enabled(True)
 
-    assert lookup_consumer._last_system == ""
+    mock_fire.assert_called_once_with("Sol")
+    assert lookup_consumer._last_system == "Sol"

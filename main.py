@@ -239,7 +239,7 @@ class Plugin:
         else:
             for consumer in self.consumers:
                 if isinstance(consumer, EdsmLookupConsumer):
-                    consumer.clear_last_system()
+                    consumer.force_lookup(consumer._last_system)
                     break
         return {"success": True}
 

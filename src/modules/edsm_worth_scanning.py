@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Worth-scanning verdict derivation from EDSM body data.
 
@@ -19,6 +17,8 @@ EDSM API notes (confirmed 2026-07-06):
   - Discovery status per body: ``discovery`` dict present → discovered
   - No ``isMapped`` / ``mapped`` field exists on this endpoint
 """
+
+from __future__ import annotations
 
 from typing import TYPE_CHECKING
 

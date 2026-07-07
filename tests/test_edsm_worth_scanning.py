@@ -103,6 +103,13 @@ class TestNeutralVerdict:
         assert derive_verdict(None) is None
 
 
+class TestModuleDocstring:
+    def test_module_docstring_is_accessible(self):
+        import src.modules.edsm_worth_scanning as m
+        assert m.__doc__ is not None
+        assert "verdict" in m.__doc__
+
+
 class TestFixtureBodies:
     """Verify verdict logic against the real Wolf 359 fixture (all 3 bodies discovered)."""
 
