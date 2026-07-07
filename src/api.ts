@@ -15,3 +15,4 @@ export const checkEdRunning = callable<[], { running: boolean; reason?: string }
 export const createDiagnosticsBundle = callable<[], DiagnosticsResult>("create_diagnostics");
 export const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("get_recent_activity");
 export const getSessionStats = callable<[], SessionStats>("get_session_stats");
+export const setEdsmLookupsEnabled = callable<[boolean], BasicSuccessResult>("set_edsm_lookups_enabled");

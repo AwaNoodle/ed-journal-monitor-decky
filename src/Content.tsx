@@ -17,6 +17,7 @@ import {
   getStatus,
   setDetailedLogging,
   setEdsmCredentials,
+  setEdsmLookupsEnabled,
   setEnabled,
   setManualJournalPath,
   setUploaderId,
@@ -50,6 +51,8 @@ const Content = (): JSX.Element => {
   const [recentErrors, setRecentErrors] = useState<ActivityEntry[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
+  const [edsmLookupsEnabled, setEdsmLookupsEnabledState] = useState<boolean>(false);
+  const [edsmWorthScanning, setEdsmWorthScanning] = useState<EdsmWorthScanningVerdict | null>(null);
 
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
@@ -72,6 +75,8 @@ const Content = (): JSX.Element => {
         uploaderIdRef.current = uid;
         setEdsmCommanderInput(status.edsm_commander_name);
         setEdsmApiKeySet(status.edsm_api_key_set);
+        setEdsmLookupsEnabledState(status.edsm_lookups_enabled);
+        setEdsmWorthScanning(status.edsm_worth_scanning);
         setDetailedLoggingState(status.detailed_logging);
       } catch (e) {
         console.error("Failed to load status", e);
@@ -99,6 +104,17 @@ const Content = (): JSX.Element => {
 
     const edStateListener = addEventListener("ed_state_change", (data: EdStateChangeEvent): void => {
       setEdRunning(data.ed_running);
+      if (!data.ed_running) {
+        setEdsmWorthScanning(null);
+      }
+    });
+
+    const worthScanningListener = addEventListener("edsm_worth_scanning", (data: EdsmWorthScanningEvent): void => {
+      if (data.verdict === null) {
+        setEdsmWorthScanning(null);
+      } else {
+        setEdsmWorthScanning(data);
+      }
     });
 
     const sessionListener = addEventListener("session_update", (data: SessionUpdateEvent): void => {
@@ -168,6 +184,7 @@ const Content = (): JSX.Element => {
       removeEventListener("upload_failed", failListener);
       removeEventListener("activity_update", activityListener);
       removeEventListener("commander_detected", commanderListener);
+      removeEventListener("edsm_worth_scanning", worthScanningListener);
     };
   }, []);
 
@@ -224,6 +241,35 @@ const Content = (): JSX.Element => {
   const handleDetailedLoggingToggle = async (state: boolean): Promise<void> => {
     await setDetailedLogging(state);
     setDetailedLoggingState(state);
+  };
+
+  const handleEdsmLookupsToggle = async (state: boolean): Promise<void> => {
+    await setEdsmLookupsEnabled(state);
+    setEdsmLookupsEnabledState(state);
+    if (!state) {
+      setEdsmWorthScanning(null);
+    }
+  };
+
+  const getWorthScanningChip = (): JSX.Element | null => {
+    if (!edsmWorthScanning) return null;
+    const { verdict } = edsmWorthScanning;
+    const colour = verdict === "green" ? "#4CAF50" : verdict === "yellow" ? "#FFC107" : verdict === "red" ? "#f44336" : "#888";
+    const label = verdict === "green" ? "Worth scanning" : verdict === "yellow" ? "Partially explored" : verdict === "red" ? "Fully explored" : "Checking…";
+    return (
+      <span style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: "12px",
+        backgroundColor: colour,
+        color: "#fff",
+        fontSize: "11px",
+        fontWeight: "bold",
+        letterSpacing: "0.3px",
+      }}>
+        {label} · EDSM
+      </span>
+    );
   };
 
   const handleCreateDiagnostics = async (): Promise<void> => {
@@ -309,19 +355,23 @@ const Content = (): JSX.Element => {
     return (
       <>
         <PanelSectionRow>
-          <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Location</span>
-            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
-              {sessionStats.star_system || "Unknown"}
-            </span>
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
           <div style={{ display: "flex", flexWrap: "wrap", width: "100%" }}>
             {renderCounter("Jumps", String(sessionStats.jumps))}
             {renderCounter("Distance (ly)", sessionStats.distance_ly.toFixed(1))}
             {renderCounter("Bodies Scanned", String(sessionStats.bodies_scanned))}
             {renderCounter("First Discoveries", String(sessionStats.first_discoveries))}
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Current location</span>
+            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+              {sessionStats.star_system || "Unknown"}
+            </span>
+            {getWorthScanningChip()}
           </div>
         </PanelSectionRow>
       </>
@@ -337,9 +387,16 @@ const Content = (): JSX.Element => {
       <PanelSection title="Status">
         <PanelSectionRow>
           <ToggleField
-            label="Enabled"
+            label="Watch journal"
             checked={enabled}
             onChange={(state: boolean): void => { void handleToggle(state); }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Enable EDSM lookup"
+            checked={edsmLookupsEnabled}
+            onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
           />
         </PanelSectionRow>
         <PanelSectionRow>

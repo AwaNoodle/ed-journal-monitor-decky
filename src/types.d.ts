@@ -100,6 +100,18 @@ interface FindPathResult {
   path?: string;
 }
 
+// Worth-scanning verdict for the current system, sourced from EDSM public data.
+// null verdict = neutral (disabled, in-flight, or lookup failed).
+// system is null when verdict is null (clear event emitted on ED stop / toggle-off).
+interface EdsmWorthScanningVerdict {
+  system: string | null;
+  verdict: "green" | "yellow" | "red" | null;
+  source: "edsm";
+}
+
+// Emitted as "edsm_worth_scanning" decky event on each arrival.
+type EdsmWorthScanningEvent = EdsmWorthScanningVerdict;
+
 interface GetStatusResult {
   ed_running: boolean;
   enabled: boolean;
@@ -112,7 +124,9 @@ interface GetStatusResult {
   uploader_id: string;
   edsm_commander_name: string;
   edsm_api_key_set: boolean;
+  edsm_lookups_enabled: boolean;
   detailed_logging: boolean;
+  edsm_worth_scanning: EdsmWorthScanningVerdict | null;
 }
 
 interface GetEdsmCredentialsResult {

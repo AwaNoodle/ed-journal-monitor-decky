@@ -21,6 +21,7 @@ if str(_bin_dir) not in sys.path:
 
 from src.modules.activity_log import ActivityLog  # noqa: E402
 from src.modules.diagnostics import create_diagnostics as _create_diagnostics  # noqa: E402
+from src.modules.edsm_lookup_consumer import EdsmLookupConsumer  # noqa: E402
 from src.modules.forwarders.edsm import EdsmForwarder  # noqa: E402
 from src.modules.parser import JournalParser  # noqa: E402
 from src.modules.path_finder import JournalPathFinder  # noqa: E402
@@ -42,11 +43,14 @@ class Plugin:
         self.submitter: EDDNSubmitter | None = None
         self.session_stats: SessionStatsAccumulator | None = None
         self.edsm: EdsmForwarder | None = None
+        self.edsm_lookup: EdsmLookupConsumer | None = None
         self.watcher: JournalWatcher | None = None
         # Stream consumers driven by lifecycle/stats fan-out (session stats,
         # EDSM forwarder, ...). The watcher fans observe() to the same list.
         self.consumers: list = []
         self.ed_running: bool = False
+        # Current worth-scanning verdict for the active system (set by lookup consumer).
+        self._edsm_verdict: dict | None = None
         # Strong references to in-flight emit tasks (asyncio keeps only weak
         # references, so an unreferenced task can be GC'd mid-flight).
         self._emit_tasks: set[asyncio.Task] = set()
@@ -81,7 +85,11 @@ class Plugin:
             on_stats_change=self._on_target_stats_change,
             activity_log=self.activity_log,
         )
-        self.consumers = [self.session_stats, self.edsm]
+        self.edsm_lookup = EdsmLookupConsumer(
+            settings=self.settings,
+            on_verdict=self._on_edsm_verdict,
+        )
+        self.consumers = [self.session_stats, self.edsm, self.edsm_lookup]
         signal_batcher = SignalBatcher()
         self.watcher = JournalWatcher(
             settings=self.settings,
@@ -177,8 +185,10 @@ class Plugin:
             "uploader_id": uploader_id,
             "edsm_commander_name": self.settings.get("edsm_commander_name", "") if self.settings else "",
             "edsm_api_key_set": bool(self.settings.get("edsm_api_key")) if self.settings else False,
+            "edsm_lookups_enabled": bool(self.settings.get("edsm_lookups_enabled", False)) if self.settings else False,
             "enabled": self.settings.get("enabled", True) if self.settings else True,
             "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
+            "edsm_worth_scanning": self._edsm_verdict,
             **self._build_target_stats(),
         }
 
@@ -220,6 +230,19 @@ class Plugin:
             await self.watcher.stop()
         return {"success": True, "enabled": enabled}
 
+    async def set_edsm_lookups_enabled(self, enabled: bool) -> dict:
+        """Enable or disable EDSM auto-lookups. Independent of the EDSM API key."""
+        await self.settings.set("edsm_lookups_enabled", enabled)
+        if not enabled:
+            self._edsm_verdict = None
+            await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
+        else:
+            for consumer in self.consumers:
+                if isinstance(consumer, EdsmLookupConsumer):
+                    consumer.force_lookup(consumer._last_system)
+                    break
+        return {"success": True}
+
     async def set_detailed_logging(self, enabled: bool) -> dict:
         """Set detailed logging (DEBUG) on or off (INFO). Persists to settings."""
         if enabled:
@@ -239,6 +262,7 @@ class Plugin:
         if enabled:
             if self.submitter:
                 self.submitter.reset_stats()
+            self._edsm_verdict = None
             # New launch epoch: reset/start every stream consumer (session
             # stats, EDSM forwarder). Runs before start_watcher's _initial_scan
             # replay so the current launch's earlier events are recounted.
@@ -247,6 +271,9 @@ class Plugin:
                 if callable(start):
                     start()
             await decky.emit("status_update", self._build_target_stats())
+        else:
+            self._edsm_verdict = None
+            await decky.emit("edsm_worth_scanning", {"verdict": None, "system": None, "source": "edsm"})
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 
@@ -285,6 +312,11 @@ class Plugin:
         return self.session_stats.get_stats()
 
     # --- internal helpers ---
+
+    def _on_edsm_verdict(self, system_name: str, verdict: str | None) -> None:
+        """Called by the lookup consumer when a verdict is ready.  Stores it for
+        get_status() rehydration and schedules a frontend emit."""
+        self._edsm_verdict = {"system": system_name, "verdict": verdict, "source": "edsm"}
 
     def _build_target_stats(self) -> dict:
         """Aggregate per-target upload stats by iterating the consumer registry.

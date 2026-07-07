@@ -6,9 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **EDSM worth-scanning lookup**: on arrival in a system (`FSDJump`/`Location`), the plugin can now fetch EDSM's public system body data and display a glanceable **worth-scanning chip** in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). The chip is labelled as EDSM-sourced and updates live on each arrival. A new **Enable EDSM lookup** toggle in the Status section controls this feature; it is **off by default** and independent of the EDSM API key (the system endpoints are public and require no key). Lookups are fully isolated from EDDN and EDSM-write: a read failure or EDSM outage never affects submission. Results are cached per-system (4 h TTL) so re-jumping to a known system makes no new request. New `set_edsm_lookups_enabled` callable and `edsm_lookups_enabled` setting.
+
+### Fixed
+
+- **Re-enable EDSM lookups now fires an immediate lookup**: previously, toggling EDSM lookups back on only cleared the dedup state so the verdict would refresh on the _next_ jump, leaving the chip empty if the player never jumped. `set_edsm_lookups_enabled(True)` now calls `force_lookup` with the current system, so the chip populates immediately.
+- **`edsm_worth_scanning` module docstring now accessible**: the docstring was placed after `from __future__ import annotations`, making `__doc__` return `None`. Moved to the top of the file per PEP 257.
+- **EDSM lookup staleness guard**: if the player jumps to a new system while a previous lookup is still in flight, the stale result is now silently discarded instead of overwriting the current system's verdict.
+- **EDSM unavailable result not cached**: `STATUS_UNAVAILABLE` results (network error / timeout) are no longer written to the per-session cache, so the next arrival in the same system retries the lookup rather than sticking on a transient failure.
+- **Stale worth-scanning chip after ED quits**: `set_ed_running(False)` now clears `_edsm_verdict` and emits an `edsm_worth_scanning` clear event so the chip disappears when the game exits.
+- **Chip persists after EDSM lookup toggle-off**: `set_edsm_lookups_enabled(False)` now clears `_edsm_verdict` and emits a null clear event; the frontend `handleEdsmLookupsToggle` also calls `setEdsmWorthScanning(null)` immediately. The `worthScanningListener` now treats `{verdict: null}` as a clear signal rather than passing it through to the chip renderer.
+
 ### Internal
 
 - The Release workflow now triggers on tag push (`v*`): pushing a tag lints, tests, packages, creates the GitHub Release with notes from the matching `CHANGELOG.md` section, and attaches the built `.zip`. Previously the GitHub Release had to be created by hand. The manually-published-Release path is still supported.
+- Module docstrings in `edsm_lookup_consumer.py`, `edsm_read_client.py`, `edsm_system_cache.py`, and `edsm_worth_scanning.py` moved to before `from __future__ import annotations` (PEP 257 / Python convention).
+- `EDSM_USER_AGENT` centralised in `constants.py`; both EDSM clients (`edsm_read_client.py` and `forwarders/edsm_client.py`) now import it instead of each defining an independent copy.
+- `EdsmLookupConsumer.clear_last_system()` replaced by `force_lookup(system_name)`, which bypasses dedup and immediately fires a background lookup — a cleaner API that both resets state and populates the chip without waiting for the next jump.
 
 ## [0.5.0] - 2026-07-01
 
