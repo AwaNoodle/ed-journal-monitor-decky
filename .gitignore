@@ -63,6 +63,9 @@ cli/decky
 # OpenCode plugins
 .opencode/
 
+# Claude Code local settings (personal permission overrides — not shared)
+.claude/settings.local.json
+
 # Python virtual environment
 .venv/
 example-events/
