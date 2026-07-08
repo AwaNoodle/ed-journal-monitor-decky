@@ -251,6 +251,34 @@ const Content = (): JSX.Element => {
     }
   };
 
+  const formatCredits = (value: number): string => {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+    return String(value);
+  };
+
+  // Renders only when a value fetch has actually succeeded (totalValue !== null).
+  // When it hasn't (disabled, in-flight, or a contained failure), rendering
+  // nothing is the neutral state — consistent with the worth-scanning chip,
+  // which disappears the same way.
+  const getSystemValueDisplay = (): JSX.Element | null => {
+    if (!edsmWorthScanning || edsmWorthScanning.totalValue === null) return null;
+    const { totalValue, priorityBodies } = edsmWorthScanning;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+        <span style={{ fontSize: "12px" }}>
+          <strong>{formatCredits(totalValue)} CR</strong>
+          <span style={{ opacity: 0.6 }}> est. scan value</span>
+        </span>
+        {priorityBodies.length > 0 && (
+          <span style={{ fontSize: "11px", opacity: 0.8, overflowWrap: "anywhere" }}>
+            {priorityBodies.map((b): string => `${b.name} (${formatCredits(b.value)})`).join(", ")}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const getWorthScanningChip = (): JSX.Element | null => {
     if (!edsmWorthScanning) return null;
     const { verdict } = edsmWorthScanning;
@@ -372,6 +400,7 @@ const Content = (): JSX.Element => {
               {sessionStats.star_system || "Unknown"}
             </span>
             {getWorthScanningChip()}
+            {getSystemValueDisplay()}
           </div>
         </PanelSectionRow>
       </>

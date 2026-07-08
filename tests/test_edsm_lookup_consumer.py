@@ -8,13 +8,19 @@ Covers:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from conftest import MockSettings
 
 from src.modules.edsm_lookup_consumer import EdsmLookupConsumer
-from src.modules.edsm_read_client import STATUS_UNKNOWN, SystemBodiesResult
+from src.modules.edsm_read_client import (
+    STATUS_OK,
+    STATUS_UNAVAILABLE,
+    STATUS_UNKNOWN,
+    SystemBodiesResult,
+    SystemValueResult,
+)
 from src.modules.parser import ParsedEvent, SessionState
 
 
@@ -36,6 +42,9 @@ def _session(system: str = "Sol") -> SessionState:
 def mock_read_client():
     client = MagicMock()
     client.get_system_bodies.return_value = SystemBodiesResult(
+        status=STATUS_UNKNOWN, system_name="Sol"
+    )
+    client.get_estimated_value.return_value = SystemValueResult(
         status=STATUS_UNKNOWN, system_name="Sol"
     )
     return client
@@ -311,3 +320,115 @@ class TestSessionLifecycle:
     def test_get_stats_does_not_report_upload_stats(self, consumer):
         """The lookup consumer is read-only; it must not appear in upload stats."""
         assert not getattr(consumer, "reports_upload_stats", False)
+
+
+class TestValueFetch:
+    """The arrival lookup also fetches estimated-value alongside bodies."""
+
+    def _value_result(self, total=1500, bodies=None):
+        return SystemValueResult(
+            status=STATUS_OK,
+            system_name="Sol",
+            total_value=total,
+            valuable_bodies=bodies or [{"bodyId": 1, "bodyName": "Earth", "valueMax": 900}],
+        )
+
+    def test_sync_lookup_fetches_value_alongside_bodies(self, mock_read_client):
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_read_client.get_estimated_value.return_value = self._value_result()
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client)
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        mock_read_client.get_estimated_value.assert_called_once_with("Sol")
+
+    def test_on_value_callback_receives_summary(self, mock_read_client):
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_read_client.get_estimated_value.return_value = self._value_result()
+        values: list[tuple[str, dict | None]] = []
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_read_client,
+            on_value=lambda s, v: values.append((s, v)),
+        )
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        assert len(values) == 1
+        system, payload = values[0]
+        assert system == "Sol"
+        assert payload["totalValue"] == 1500
+        assert payload["priorityBodies"] == [{"name": "Earth", "value": 900}]
+
+    def test_value_fetch_failure_reports_neutral_via_on_value(self, mock_read_client):
+        """A contained value-fetch failure must not raise and must report neutral."""
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        mock_read_client.get_system_bodies.return_value = SystemBodiesResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNAVAILABLE, system_name="Sol"
+        )
+        values: list[tuple[str, dict | None]] = []
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_read_client,
+            on_value=lambda s, v: values.append((s, v)),
+        )
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        assert values == [("Sol", None)]
+
+    def test_value_result_cached_alongside_bodies(self, mock_read_client):
+        """A cache hit for value must skip the network call, same as bodies."""
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        from src.modules.edsm_system_cache import SystemLookupCache
+
+        cache = SystemLookupCache()
+        cache.set_value("Sol", self._value_result())
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client, cache=cache)
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        mock_read_client.get_estimated_value.assert_not_called()
+
+    def test_unavailable_value_result_is_not_cached(self, mock_read_client):
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNAVAILABLE, system_name="Sol"
+        )
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        from src.modules.edsm_system_cache import SystemLookupCache
+
+        cache = SystemLookupCache()
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client, cache=cache)
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        assert cache.get_value("Sol") is None
+
+    @pytest.mark.asyncio
+    async def test_async_lookup_emits_merged_verdict_and_value(self, mock_read_client):
+        """The decky event for a live arrival carries both verdict and value fields."""
+        mock_read_client.get_system_bodies.return_value = SystemBodiesResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        mock_read_client.get_estimated_value.return_value = self._value_result()
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client)
+        consumer._last_system = "Sol"
+
+        with patch("src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock) as mock_emit:
+            await consumer._lookup_async("Sol")
+
+        mock_emit.assert_called_once()
+        _event_name, payload = mock_emit.call_args.args
+        assert payload["system"] == "Sol"
+        assert payload["verdict"] == "green"
+        assert payload["totalValue"] == 1500
+        assert payload["priorityBodies"] == [{"name": "Earth", "value": 900}]

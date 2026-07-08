@@ -100,13 +100,25 @@ interface FindPathResult {
   path?: string;
 }
 
+// A single priority body from the EDSM system value summary (highest-value
+// bodies first).
+interface EdsmPriorityBody {
+  name: string;
+  value: number;
+}
+
 // Worth-scanning verdict for the current system, sourced from EDSM public data.
 // null verdict = neutral (disabled, in-flight, or lookup failed).
 // system is null when verdict is null (clear event emitted on ED stop / toggle-off).
+// totalValue is the system's estimated scan-only value (a floor — excludes any
+// mapping bonus); null when the value fetch is disabled, in-flight, or failed.
+// priorityBodies is the ranked top-N highest-value bodies (empty when none).
 interface EdsmWorthScanningVerdict {
   system: string | null;
   verdict: "green" | "yellow" | "red" | null;
   source: "edsm";
+  totalValue: number | null;
+  priorityBodies: EdsmPriorityBody[];
 }
 
 // Emitted as "edsm_worth_scanning" decky event on each arrival.
