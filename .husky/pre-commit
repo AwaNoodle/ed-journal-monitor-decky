@@ -1,1 +1,6 @@
 npx lint-staged
+
+staged=$(git diff --cached --name-only)
+if echo "$staged" | grep -qE '^(src/modules/|main\.py)' && ! echo "$staged" | grep -qx 'CHANGELOG.md'; then
+  echo "Reminder: source files are staged but CHANGELOG.md is not — add an [Unreleased] entry per AGENTS.md if this change is user-facing."
+fi
