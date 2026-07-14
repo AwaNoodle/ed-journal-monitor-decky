@@ -62,12 +62,16 @@ class TestSetEdRunning:
         assert plugin.ed_running is False
         assert plugin._edsm_verdict is None
         # Emits edsm_worth_scanning clear then ed_state_change
-        assert len(emitted_events) == 2
+        assert len(emitted_events) == 3
         assert emitted_events[0] == ("edsm_worth_scanning", {
             "verdict": None, "system": None, "source": "edsm",
             "totalValue": None, "priorityBodies": [],
         })
-        assert emitted_events[1] == ("ed_state_change", {"ed_running": False})
+        assert emitted_events[1] == ("edsm_next_hop", {
+            "system": None, "scoopable": None, "starClass": None, "verdict": None,
+            "source": "edsm", "totalValue": None, "priorityBodies": [],
+        })
+        assert emitted_events[2] == ("ed_state_change", {"ed_running": False})
 
     @pytest.mark.asyncio
     async def test_set_ed_running_noop_on_same_state(self):
@@ -116,12 +120,16 @@ class TestSetEdRunning:
         with patch("decky.emit", side_effect=mock_emit):
             await plugin.set_ed_running(False)
 
-        assert len(emitted_events) == 2
+        assert len(emitted_events) == 3
         assert emitted_events[0] == ("edsm_worth_scanning", {
             "verdict": None, "system": None, "source": "edsm",
             "totalValue": None, "priorityBodies": [],
         })
-        assert emitted_events[1] == ("ed_state_change", {"ed_running": False})
+        assert emitted_events[1] == ("edsm_next_hop", {
+            "system": None, "scoopable": None, "starClass": None, "verdict": None,
+            "source": "edsm", "totalValue": None, "priorityBodies": [],
+        })
+        assert emitted_events[2] == ("ed_state_change", {"ed_running": False})
 
     @pytest.mark.asyncio
     async def test_set_ed_running_true_resets_submitter_stats(self):

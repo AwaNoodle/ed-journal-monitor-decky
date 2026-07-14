@@ -22,12 +22,19 @@ if str(_bin_dir) not in sys.path:
 from src.modules.activity_log import ActivityLog  # noqa: E402
 from src.modules.diagnostics import create_diagnostics as _create_diagnostics  # noqa: E402
 from src.modules.edsm_lookup_consumer import EdsmLookupConsumer  # noqa: E402
+from src.modules.edsm_next_hop_consumer import (  # noqa: E402
+    EdsmNextHopConsumer,
+    neutral_next_hop,
+)
+from src.modules.edsm_read_client import EdsmReadClient  # noqa: E402
+from src.modules.edsm_system_cache import SystemLookupCache  # noqa: E402
 from src.modules.forwarders.edsm import EdsmForwarder  # noqa: E402
 from src.modules.parser import JournalParser  # noqa: E402
 from src.modules.path_finder import JournalPathFinder  # noqa: E402
 from src.modules.session_stats import SessionStats, SessionStatsAccumulator  # noqa: E402
 from src.modules.settings import PluginSettings  # noqa: E402
 from src.modules.signal_batcher import SignalBatcher  # noqa: E402
+from src.modules.ssl_context import build_ssl_context  # noqa: E402
 from src.modules.submitter import EDDNSubmitter  # noqa: E402
 from src.modules.validator import EDDNValidator  # noqa: E402
 from src.modules.watcher import JournalWatcher  # noqa: E402
@@ -44,6 +51,7 @@ class Plugin:
         self.session_stats: SessionStatsAccumulator | None = None
         self.edsm: EdsmForwarder | None = None
         self.edsm_lookup: EdsmLookupConsumer | None = None
+        self.edsm_next_hop: EdsmNextHopConsumer | None = None
         self.watcher: JournalWatcher | None = None
         # Stream consumers driven by lifecycle/stats fan-out (session stats,
         # EDSM forwarder, ...). The watcher fans observe() to the same list.
@@ -51,6 +59,8 @@ class Plugin:
         self.ed_running: bool = False
         # Current worth-scanning verdict for the active system (set by lookup consumer).
         self._edsm_verdict: dict | None = None
+        # Next-in-route hop preview for the plotted route (set by next-hop consumer).
+        self._edsm_next_hop: dict | None = None
         # Strong references to in-flight emit tasks (asyncio keeps only weak
         # references, so an unreferenced task can be GC'd mid-flight).
         self._emit_tasks: set[asyncio.Task] = set()
@@ -85,12 +95,25 @@ class Plugin:
             on_stats_change=self._on_target_stats_change,
             activity_log=self.activity_log,
         )
+        # Share one read client + per-system cache across both EDSM read
+        # consumers, so a system previewed as a next hop is a cache hit once it
+        # becomes the current system (and vice versa).
+        edsm_read_client = EdsmReadClient(ssl_context=build_ssl_context())
+        edsm_cache = SystemLookupCache()
         self.edsm_lookup = EdsmLookupConsumer(
             settings=self.settings,
+            read_client=edsm_read_client,
+            cache=edsm_cache,
             on_verdict=self._on_edsm_verdict,
             on_value=self._on_edsm_value,
         )
-        self.consumers = [self.session_stats, self.edsm, self.edsm_lookup]
+        self.edsm_next_hop = EdsmNextHopConsumer(
+            settings=self.settings,
+            read_client=edsm_read_client,
+            cache=edsm_cache,
+            on_next_hop=self._on_edsm_next_hop,
+        )
+        self.consumers = [self.session_stats, self.edsm, self.edsm_lookup, self.edsm_next_hop]
         signal_batcher = SignalBatcher()
         self.watcher = JournalWatcher(
             settings=self.settings,
@@ -190,6 +213,7 @@ class Plugin:
             "enabled": self.settings.get("enabled", True) if self.settings else True,
             "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
             "edsm_worth_scanning": self._edsm_verdict,
+            "edsm_next_hop": self._edsm_next_hop,
             **self._build_target_stats(),
         }
 
@@ -236,15 +260,17 @@ class Plugin:
         await self.settings.set("edsm_lookups_enabled", enabled)
         if not enabled:
             self._edsm_verdict = None
+            self._edsm_next_hop = None
             await decky.emit("edsm_worth_scanning", {
                 "verdict": None, "system": None, "source": "edsm",
                 "totalValue": None, "priorityBodies": [],
             })
+            await decky.emit("edsm_next_hop", neutral_next_hop())
         else:
-            for consumer in self.consumers:
-                if isinstance(consumer, EdsmLookupConsumer):
-                    consumer.force_lookup(consumer._last_system)
-                    break
+            if self.edsm_lookup is not None:
+                self.edsm_lookup.force_lookup(self.edsm_lookup._last_system)
+            if self.edsm_next_hop is not None:
+                self.edsm_next_hop.reevaluate()
         return {"success": True}
 
     async def set_detailed_logging(self, enabled: bool) -> dict:
@@ -267,6 +293,7 @@ class Plugin:
             if self.submitter:
                 self.submitter.reset_stats()
             self._edsm_verdict = None
+            self._edsm_next_hop = None
             # New launch epoch: reset/start every stream consumer (session
             # stats, EDSM forwarder). Runs before start_watcher's _initial_scan
             # replay so the current launch's earlier events are recounted.
@@ -277,10 +304,12 @@ class Plugin:
             await decky.emit("status_update", self._build_target_stats())
         else:
             self._edsm_verdict = None
+            self._edsm_next_hop = None
             await decky.emit("edsm_worth_scanning", {
                 "verdict": None, "system": None, "source": "edsm",
                 "totalValue": None, "priorityBodies": [],
             })
+            await decky.emit("edsm_next_hop", neutral_next_hop())
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 
@@ -338,6 +367,13 @@ class Plugin:
         else:
             self._edsm_verdict["totalValue"] = value_payload["totalValue"]
             self._edsm_verdict["priorityBodies"] = value_payload["priorityBodies"]
+
+    def _on_edsm_next_hop(self, payload: dict) -> None:
+        """Called by the next-hop consumer with a preview (or a neutral payload).
+
+        Stores it for get_status() rehydration; a neutral payload (system None)
+        is stored as None so get_status mirrors the verdict's neutral state."""
+        self._edsm_next_hop = payload if payload.get("system") else None
 
     def _build_target_stats(self) -> dict:
         """Aggregate per-target upload stats by iterating the consumer registry.

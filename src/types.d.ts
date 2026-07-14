@@ -124,6 +124,25 @@ interface EdsmWorthScanningVerdict {
 // Emitted as "edsm_worth_scanning" decky event on each arrival.
 type EdsmWorthScanningEvent = EdsmWorthScanningVerdict;
 
+// Next-in-route hop preview for the next system in the plotted route.
+// system is null in the neutral state (no route, no next hop, or disabled).
+// scoopable is derived from the plotted route's primary-star class (fuel
+// safety) and stays present even when the EDSM lookup is unavailable; it is
+// null only when the star class is unknown. verdict/totalValue/priorityBodies
+// come from the EDSM per-system read and are neutral (null/[]) when unavailable.
+interface EdsmNextHopPreview {
+  system: string | null;
+  scoopable: boolean | null;
+  starClass: string | null;
+  verdict: "green" | "yellow" | "red" | null;
+  source: "edsm";
+  totalValue: number | null;
+  priorityBodies: EdsmPriorityBody[];
+}
+
+// Emitted as "edsm_next_hop" decky event on route change / after each jump.
+type EdsmNextHopEvent = EdsmNextHopPreview;
+
 interface GetStatusResult {
   ed_running: boolean;
   enabled: boolean;
@@ -139,6 +158,7 @@ interface GetStatusResult {
   edsm_lookups_enabled: boolean;
   detailed_logging: boolean;
   edsm_worth_scanning: EdsmWorthScanningVerdict | null;
+  edsm_next_hop: EdsmNextHopPreview | null;
 }
 
 interface GetEdsmCredentialsResult {

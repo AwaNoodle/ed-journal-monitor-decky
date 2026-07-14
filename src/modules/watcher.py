@@ -256,6 +256,27 @@ class JournalWatcher:
             except Exception as e:
                 decky.logger.error(f"Stream consumer error on {event.event_type}: {e}")
 
+    def _fan_out_nav_route(self, auxiliary_data: dict) -> None:
+        """Deliver the plotted route to consumers implementing ``on_nav_route``.
+
+        NavRoute.json holds the ordered ``Route`` array; ``NavRouteClear`` content
+        means the route was cleared (delivered as an empty route). Per-consumer
+        isolation, same as ``_fan_out``.
+        """
+        if auxiliary_data.get("event") == "NavRouteClear":
+            route: list = []
+        else:
+            route = auxiliary_data.get("Route")
+            if not isinstance(route, list):
+                route = []
+        for consumer in self._consumers:
+            hook = getattr(consumer, "on_nav_route", None)
+            if callable(hook):
+                try:
+                    hook(route)
+                except Exception as e:
+                    decky.logger.error(f"Consumer on_nav_route error: {e}")
+
     async def _process_reportable_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
         """Validate and submit a reportable event with schema-aware routing."""
         event_type = event.event_type
@@ -332,6 +353,9 @@ class JournalWatcher:
             return
 
         if auxiliary_schema == "navroute":
+            # Feed the plotted route to route-aware consumers (next-hop preview)
+            # before EDDN routing — independent of whether it is EDDN-submittable.
+            self._fan_out_nav_route(auxiliary_data)
             # NavRoute: transform directly using navroute/1 schema
             message = self.validator.transform_navroute(auxiliary_data, self.parser.session_state)
             if message is None:

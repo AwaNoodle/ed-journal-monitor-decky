@@ -53,6 +53,7 @@ const Content = (): JSX.Element => {
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [edsmLookupsEnabled, setEdsmLookupsEnabledState] = useState<boolean>(false);
   const [edsmWorthScanning, setEdsmWorthScanning] = useState<EdsmWorthScanningVerdict | null>(null);
+  const [edsmNextHop, setEdsmNextHop] = useState<EdsmNextHopPreview | null>(null);
 
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
@@ -77,6 +78,7 @@ const Content = (): JSX.Element => {
         setEdsmApiKeySet(status.edsm_api_key_set);
         setEdsmLookupsEnabledState(status.edsm_lookups_enabled);
         setEdsmWorthScanning(status.edsm_worth_scanning);
+        setEdsmNextHop(status.edsm_next_hop);
         setDetailedLoggingState(status.detailed_logging);
       } catch (e) {
         console.error("Failed to load status", e);
@@ -106,6 +108,7 @@ const Content = (): JSX.Element => {
       setEdRunning(data.ed_running);
       if (!data.ed_running) {
         setEdsmWorthScanning(null);
+        setEdsmNextHop(null);
       }
     });
 
@@ -115,6 +118,11 @@ const Content = (): JSX.Element => {
       } else {
         setEdsmWorthScanning(data);
       }
+    });
+
+    const nextHopListener = addEventListener("edsm_next_hop", (data: EdsmNextHopEvent): void => {
+      // Neutral payload (no route / no hop / disabled) has system === null.
+      setEdsmNextHop(data.system === null ? null : data);
     });
 
     const sessionListener = addEventListener("session_update", (data: SessionUpdateEvent): void => {
@@ -185,6 +193,7 @@ const Content = (): JSX.Element => {
       removeEventListener("activity_update", activityListener);
       removeEventListener("commander_detected", commanderListener);
       removeEventListener("edsm_worth_scanning", worthScanningListener);
+      removeEventListener("edsm_next_hop", nextHopListener);
     };
   }, []);
 
@@ -248,6 +257,7 @@ const Content = (): JSX.Element => {
     setEdsmLookupsEnabledState(state);
     if (!state) {
       setEdsmWorthScanning(null);
+      setEdsmNextHop(null);
     }
   };
 
@@ -297,6 +307,49 @@ const Content = (): JSX.Element => {
       }}>
         {label} · EDSM
       </span>
+    );
+  };
+
+  // Next-in-route preview: the next system the plotted route jumps to, its
+  // primary-star scoopability (fuel safety), and its EDSM verdict/value when
+  // available. Renders nothing in the neutral state (no route / disabled).
+  const getNextHopDisplay = (): JSX.Element | null => {
+    if (!edsmNextHop || edsmNextHop.system === null) return null;
+    const { system, scoopable, verdict, totalValue } = edsmNextHop;
+    const scoopLabel =
+      scoopable === true ? "⛽ Scoopable"
+      : scoopable === false ? "🚱 Not scoopable"
+      : null;
+    const scoopColour = scoopable === false ? "#f44336" : "#4CAF50";
+    const verdictLabel =
+      verdict === "green" ? "Worth scanning"
+      : verdict === "yellow" ? "Partially explored"
+      : verdict === "red" ? "Fully explored"
+      : null;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+        <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          Next hop · EDSM
+        </span>
+        <span style={{ fontSize: "14px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+          {system}
+        </span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+          {scoopLabel && (
+            <span style={{ fontSize: "11px", fontWeight: "bold", color: scoopColour }}>
+              {scoopLabel}
+            </span>
+          )}
+          {verdictLabel && (
+            <span style={{ fontSize: "11px", opacity: 0.8 }}>{verdictLabel}</span>
+          )}
+          {totalValue !== null && (
+            <span style={{ fontSize: "11px", opacity: 0.8 }}>
+              {formatCredits(totalValue)} CR
+            </span>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -403,6 +456,9 @@ const Content = (): JSX.Element => {
             {getSystemValueDisplay()}
           </div>
         </PanelSectionRow>
+        {getNextHopDisplay() && (
+          <PanelSectionRow>{getNextHopDisplay()}</PanelSectionRow>
+        )}
       </>
     );
   };
