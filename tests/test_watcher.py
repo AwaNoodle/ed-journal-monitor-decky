@@ -400,6 +400,46 @@ class TestAuxiliaryFileHandling:
         assert call_kwargs.get("event_name") == "NavRoute"
 
     @pytest.mark.asyncio
+    async def test_navroute_route_fanned_to_route_consumers(self, watcher, tmp_path, copy_fixture):
+        """The plotted Route is delivered to consumers implementing on_nav_route."""
+        copy_fixture("NavRoute.json")
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        routes: list = []
+
+        class RouteConsumer:
+            name = "route"
+            def observe(self, event, session_state): pass
+            def on_nav_route(self, route): routes.append(route)
+
+        watcher._consumers = [RouteConsumer()]
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"NavRoute"}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        assert len(routes) == 1
+        assert [e["StarSystem"] for e in routes[0]] == ["Sol", "Alpha Centauri"]
+
+    def test_fan_out_nav_route_clear_delivers_empty_route(self, watcher):
+        """NavRouteClear content is delivered as an empty route."""
+        routes: list = []
+
+        class RouteConsumer:
+            name = "route"
+            def observe(self, event, session_state): pass
+            def on_nav_route(self, route): routes.append(route)
+
+        watcher._consumers = [RouteConsumer()]
+        watcher._fan_out_nav_route({"event": "NavRouteClear"})
+
+        assert routes == [[]]
+
+    @pytest.mark.asyncio
     async def test_docked_event_does_not_trigger_auxiliary(self, watcher, tmp_path):
         """Docked is reportable but has no auxiliary file — should go through journal/1 only."""
         watcher.submitter.submit = AsyncMock(return_value=True)

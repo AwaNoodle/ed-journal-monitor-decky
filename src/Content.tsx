@@ -53,6 +53,7 @@ const Content = (): JSX.Element => {
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [edsmLookupsEnabled, setEdsmLookupsEnabledState] = useState<boolean>(false);
   const [edsmWorthScanning, setEdsmWorthScanning] = useState<EdsmWorthScanningVerdict | null>(null);
+  const [edsmNextHop, setEdsmNextHop] = useState<EdsmNextHopPreview | null>(null);
 
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
@@ -77,6 +78,7 @@ const Content = (): JSX.Element => {
         setEdsmApiKeySet(status.edsm_api_key_set);
         setEdsmLookupsEnabledState(status.edsm_lookups_enabled);
         setEdsmWorthScanning(status.edsm_worth_scanning);
+        setEdsmNextHop(status.edsm_next_hop);
         setDetailedLoggingState(status.detailed_logging);
       } catch (e) {
         console.error("Failed to load status", e);
@@ -106,6 +108,7 @@ const Content = (): JSX.Element => {
       setEdRunning(data.ed_running);
       if (!data.ed_running) {
         setEdsmWorthScanning(null);
+        setEdsmNextHop(null);
       }
     });
 
@@ -115,6 +118,11 @@ const Content = (): JSX.Element => {
       } else {
         setEdsmWorthScanning(data);
       }
+    });
+
+    const nextHopListener = addEventListener("edsm_next_hop", (data: EdsmNextHopEvent): void => {
+      // Neutral payload (no route / no hop / disabled) has system === null.
+      setEdsmNextHop(data.system === null ? null : data);
     });
 
     const sessionListener = addEventListener("session_update", (data: SessionUpdateEvent): void => {
@@ -185,6 +193,7 @@ const Content = (): JSX.Element => {
       removeEventListener("activity_update", activityListener);
       removeEventListener("commander_detected", commanderListener);
       removeEventListener("edsm_worth_scanning", worthScanningListener);
+      removeEventListener("edsm_next_hop", nextHopListener);
     };
   }, []);
 
@@ -248,6 +257,7 @@ const Content = (): JSX.Element => {
     setEdsmLookupsEnabledState(state);
     if (!state) {
       setEdsmWorthScanning(null);
+      setEdsmNextHop(null);
     }
   };
 
@@ -260,10 +270,13 @@ const Content = (): JSX.Element => {
   // Renders only when a value fetch has actually succeeded (totalValue !== null).
   // When it hasn't (disabled, in-flight, or a contained failure), rendering
   // nothing is the neutral state — consistent with the worth-scanning chip,
-  // which disappears the same way.
-  const getSystemValueDisplay = (): JSX.Element | null => {
-    if (!edsmWorthScanning || edsmWorthScanning.totalValue === null) return null;
-    const { totalValue, priorityBodies } = edsmWorthScanning;
+  // which disappears the same way. Shared by the Current location and Next hop
+  // blocks.
+  const renderSystemValue = (
+    data: { totalValue: number | null; priorityBodies: EdsmPriorityBody[] } | null,
+  ): JSX.Element | null => {
+    if (!data || data.totalValue === null) return null;
+    const { totalValue, priorityBodies } = data;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
         <span style={{ fontSize: "12px" }}>
@@ -279,9 +292,8 @@ const Content = (): JSX.Element => {
     );
   };
 
-  const getWorthScanningChip = (): JSX.Element | null => {
-    if (!edsmWorthScanning) return null;
-    const { verdict } = edsmWorthScanning;
+  // Coloured worth-scanning pill (EDSM-attributed). Shared by both blocks.
+  const renderVerdictChip = (verdict: "green" | "yellow" | "red" | null): JSX.Element => {
     const colour = verdict === "green" ? "#4CAF50" : verdict === "yellow" ? "#FFC107" : verdict === "red" ? "#f44336" : "#888";
     const label = verdict === "green" ? "Worth scanning" : verdict === "yellow" ? "Partially explored" : verdict === "red" ? "Fully explored" : "Checking…";
     return (
@@ -297,6 +309,53 @@ const Content = (): JSX.Element => {
       }}>
         {label} · EDSM
       </span>
+    );
+  };
+
+  // Scoopability pill: green when scoopable, red when not; nothing when unknown.
+  const renderScoopChip = (scoopable: boolean | null): JSX.Element | null => {
+    if (scoopable === null) return null;
+    const colour = scoopable ? "#4CAF50" : "#f44336";
+    const label = scoopable ? "⛽ Scoopable" : "🚱 Not scoopable";
+    return (
+      <span style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: "12px",
+        backgroundColor: colour,
+        color: "#fff",
+        fontSize: "11px",
+        fontWeight: "bold",
+        letterSpacing: "0.3px",
+      }}>
+        {label}
+      </span>
+    );
+  };
+
+  // Next-in-route preview: the next system the plotted route jumps to. Mirrors
+  // the Current location block (system name, worth-scanning chip, est. scan
+  // value) and adds a scoopability chip (fuel safety). Preceded by a divider;
+  // renders nothing in the neutral state (no route / disabled).
+  const renderNextHop = (): JSX.Element | null => {
+    if (!edsmNextHop || edsmNextHop.system === null) return null;
+    return (
+      <>
+        <PanelSectionRow>
+          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Next hop</span>
+            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+              {edsmNextHop.system}
+            </span>
+            {edsmNextHop.verdict !== null && renderVerdictChip(edsmNextHop.verdict)}
+            {renderSystemValue(edsmNextHop)}
+            {renderScoopChip(edsmNextHop.scoopable)}
+          </div>
+        </PanelSectionRow>
+      </>
     );
   };
 
@@ -399,10 +458,11 @@ const Content = (): JSX.Element => {
             <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
               {sessionStats.star_system || "Unknown"}
             </span>
-            {getWorthScanningChip()}
-            {getSystemValueDisplay()}
+            {edsmWorthScanning && renderVerdictChip(edsmWorthScanning.verdict)}
+            {renderSystemValue(edsmWorthScanning)}
           </div>
         </PanelSectionRow>
+        {renderNextHop()}
       </>
     );
   };
