@@ -26,4 +26,4 @@
 - [x] 6.1 Run full pytest suite + lint/typecheck; all green
 - [x] 6.2 Manually verify (captured journals): plotting a route shows the next-hop preview; it advances on jump; no route → neutral; submission unaffected on failure
 - [x] 6.3 Update `README.md`, `CHANGELOG.md` (`[Unreleased]`), and `AGENTS.md`
-- [ ] 6.4 Open a PR; merge via squash-and-rebase
+- [x] 6.4 Open a PR; merge via squash-and-rebase
