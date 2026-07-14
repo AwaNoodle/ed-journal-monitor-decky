@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-14
+
 ### Added
 
 - **EDSM worth-scanning lookup**: on arrival in a system (`FSDJump`/`Location`), the plugin can now fetch EDSM's public system body data and display a glanceable **worth-scanning chip** in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). The chip is labelled as EDSM-sourced and updates live on each arrival. A new **Enable EDSM lookup** toggle in the Status section controls this feature; it is **off by default** and independent of the EDSM API key (the system endpoints are public and require no key). Lookups are fully isolated from EDDN and EDSM-write: a read failure or EDSM outage never affects submission. Results are cached per-system (4 h TTL) so re-jumping to a known system makes no new request. New `set_edsm_lookups_enabled` callable and `edsm_lookups_enabled` setting.
