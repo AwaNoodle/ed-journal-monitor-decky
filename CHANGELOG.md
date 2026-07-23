@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **CI lint failure from an unpinned ruff upgrade**: ruff 0.16 promoted `PLR0917` ("too many positional arguments") to its default rule set, flagging several pre-existing `__init__`/test signatures that were already accepted under the already-ignored `PLR0913` ("too many arguments"). Added `PLR0917` to the ignore list alongside it in `pyproject.toml` — same complaint, same rationale.
+- **Duplicate CI runs on every PR push**: `build.yml`'s `push` trigger matched every branch (`'**'`), so a push to a branch with an open PR fired both a `push` run (raw branch tip) and a `pull_request` run (merge-with-`main` ref) for the same commit. `push` is now scoped to `main` only — PRs still get full coverage via `pull_request` (which already builds the merge ref, not just the branch tip), and `main` still builds on every merge.
 
 ## [0.6.0] - 2026-07-14
 
