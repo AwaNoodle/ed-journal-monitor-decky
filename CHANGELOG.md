@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Nearest scoopable star lookup**: a new on-demand **Find Nearest Scoopable Star** action in the Session dashboard queries EDSM's `api-v1/sphere-systems` around the current system (bounded 25 ly radius, primary-star info) and reports the closest system with a fuel-scoopable (KGBFOAM) primary star — name, distance, and star class. Unlike the arrival-triggered worth-scanning/value/next-hop lookups, this is user-initiated only (a button, not fired on every jump) to keep sphere-query traffic minimal, and does not share the per-arrival cache since a radius query is point-in-time. Reuses the existing EDSM read client, custom User-Agent/SSL, and **Enable EDSM lookup** toggle — no new setting. Handles "none found within radius" and EDSM-unavailable explicitly rather than as errors. New `get_nearest_scoopable_star` callable.
 
+### Fixed
+
+- **CI lint failure from an unpinned ruff upgrade**: ruff 0.16 promoted `PLR0917` ("too many positional arguments") to its default rule set, flagging several pre-existing `__init__`/test signatures that were already accepted under the already-ignored `PLR0913` ("too many arguments"). Added `PLR0917` to the ignore list alongside it in `pyproject.toml` — same complaint, same rationale.
+
 ## [0.6.0] - 2026-07-14
 
 ### Added
