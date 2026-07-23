@@ -12,7 +12,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.modules.edsm_read_client import (
+    DEFAULT_SPHERE_RADIUS,
     EDSM_BODIES_URL,
+    EDSM_SPHERE_URL,
     EDSM_VALUE_URL,
     STATUS_OK,
     STATUS_UNAVAILABLE,
@@ -45,6 +47,11 @@ def known_bodies_fixture(load_fixture):
 @pytest.fixture
 def known_value_fixture(load_fixture):
     return load_fixture("edsm_estimated_value_known.json")
+
+
+@pytest.fixture
+def sphere_systems_fixture(load_fixture):
+    return load_fixture("edsm_sphere_systems_known.json")
 
 
 class TestGetSystemBodies:
@@ -291,4 +298,121 @@ class TestEstimatedValueContainedFailures:
             side_effect=urllib.error.URLError("Name or service not known"),
         ):
             result = client.get_estimated_value("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+
+
+class TestGetSphereSystems:
+    """Tests for the api-v1/sphere-systems GET (nearby systems + primary star)."""
+
+    def test_known_system_returns_ok_with_systems(self, client, sphere_systems_fixture):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response(sphere_systems_fixture)
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_OK
+        assert result.system_name == "Sol"
+        assert len(result.systems) == len(sphere_systems_fixture)
+        assert result.systems[1]["name"] == "Barnard's Star"
+        assert result.systems[1]["primaryStar"]["isScoopable"] is True
+
+    def test_sends_custom_user_agent(self, client):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response([])
+            client.get_sphere_systems("Sol")
+        req = mock_open.call_args.args[0]
+        assert req.get_header("User-agent")
+
+    def test_url_contains_system_name_radius_and_primary_star_flag(self, client):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response([])
+            client.get_sphere_systems("Wolf 359")
+        req = mock_open.call_args.args[0]
+        assert "Wolf+359" in req.full_url or "Wolf%20359" in req.full_url
+        assert EDSM_SPHERE_URL in req.full_url
+        assert f"radius={DEFAULT_SPHERE_RADIUS}" in req.full_url
+        assert "showPrimaryStar=1" in req.full_url
+
+    def test_custom_radius_overrides_default(self, client):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response([])
+            client.get_sphere_systems("Sol", radius=10)
+        req = mock_open.call_args.args[0]
+        assert "radius=10" in req.full_url
+
+    def test_uses_ssl_context_from_constructor(self):
+        import ssl
+        ctx = ssl.create_default_context()
+        client = EdsmReadClient(ssl_context=ctx, timeout=5)
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response([])
+            client.get_sphere_systems("Sol")
+        _args, kwargs = mock_open.call_args
+        assert kwargs.get("context") is ctx
+
+    def test_no_api_key_required(self, client, sphere_systems_fixture):
+        captured = {}
+        def fake_urlopen(req, timeout=None, context=None):
+            captured["req"] = req
+            return _http_response(sphere_systems_fixture)
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen", side_effect=fake_urlopen):
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_OK
+        assert "apiKey" not in captured["req"].full_url
+        assert "commanderName" not in captured["req"].full_url
+
+
+class TestSphereSystemsUnknownSystem:
+    def test_empty_dict_is_unknown(self, client):
+        """EDSM returns {} when the queried system itself isn't known to it."""
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response({})
+            result = client.get_sphere_systems("Unexplored System XYZ")
+        assert result.status == STATUS_UNKNOWN
+        assert result.systems == []
+
+
+class TestSphereSystemsContainedFailures:
+    """All failure modes must return STATUS_UNAVAILABLE without raising."""
+
+    def test_network_error_is_unavailable(self, client):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen", side_effect=OSError("Network error")):
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+        assert result.system_name == "Sol"
+
+    def test_timeout_is_unavailable(self, client):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen", side_effect=TimeoutError("Timed out")):
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+
+    def test_non_200_http_error_is_unavailable(self, client):
+        import urllib.error
+        with patch(
+            "src.modules.edsm_read_client.urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError(url="", code=503, msg="Service Unavailable", hdrs=None, fp=None),
+        ):
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+
+    def test_malformed_json_is_unavailable(self, client):
+        resp = MagicMock()
+        resp.read.return_value = b"not json{"
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen", return_value=resp):
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+
+    def test_non_list_non_dict_response_is_unavailable(self, client):
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response(42)
+            result = client.get_sphere_systems("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+
+    def test_url_error_is_unavailable(self, client):
+        import urllib.error
+        with patch(
+            "src.modules.edsm_read_client.urllib.request.urlopen",
+            side_effect=urllib.error.URLError("Name or service not known"),
+        ):
+            result = client.get_sphere_systems("Sol")
         assert result.status == STATUS_UNAVAILABLE

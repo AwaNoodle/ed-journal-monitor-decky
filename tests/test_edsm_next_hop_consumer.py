@@ -278,3 +278,25 @@ class TestSessionLifecycle:
         consumer.reevaluate()  # e.g. after re-enabling lookups
         assert len(captured) == 2
         assert captured[-1]["system"] == "Alpha Centauri"
+
+
+class TestCurrentSystemProperty:
+    """current_system exposes the tracked location for the on-demand
+    nearest-scoopable-star lookup."""
+
+    def test_empty_before_first_arrival(self):
+        consumer, _captured = _make()
+        assert consumer.current_system == ""
+
+    def test_reflects_last_arrival(self):
+        consumer, _captured = _make()
+        consumer.observe(_event("FSDJump", "Sol"))
+        assert consumer.current_system == "Sol"
+        consumer.observe(_event("FSDJump", "Alpha Centauri"))
+        assert consumer.current_system == "Alpha Centauri"
+
+    def test_reset_on_session_start(self):
+        consumer, _captured = _make()
+        consumer.observe(_event("FSDJump", "Sol"))
+        consumer.on_session_start()
+        assert consumer.current_system == ""

@@ -26,6 +26,16 @@ Confirmed field naming from live EDSM responses (captured 2026-07-06):
     one)
   - ``valuableBodies``: list of dicts ``{bodyId, bodyName, distance, valueMax}``,
     the highest-value individual bodies in the system
+
+``api-v1/sphere-systems`` (confirmed 2026-07-23, live query around Sol):
+  - Response is a JSON **list** of nearby systems (not a dict), each:
+    ``{name, distance, bodyCount, primaryStar: {type, name, isScoopable}}``.
+    The queried system itself is included at ``distance: 0``.
+  - ``primaryStar`` can be an empty dict ``{}`` when EDSM has no primary-star
+    data for that system — treat as scoopability-unknown, not scoopable.
+  - When the *queried* system itself isn't known to EDSM, the endpoint returns
+    an empty dict ``{}`` instead of a list.
+  - The API caps ``radius`` at 100 (ly); values above that also return ``{}``.
 """
 
 from __future__ import annotations
@@ -46,7 +56,9 @@ from src.modules.constants import EDSM_USER_AGENT
 
 EDSM_BODIES_URL = "https://www.edsm.net/api-system-v1/bodies"
 EDSM_VALUE_URL = "https://www.edsm.net/api-system-v1/estimated-value"
+EDSM_SPHERE_URL = "https://www.edsm.net/api-v1/sphere-systems"
 DEFAULT_TIMEOUT = 15  # seconds
+DEFAULT_SPHERE_RADIUS = 25  # ly; bounded to keep the on-demand query small and fast
 
 # Status sentinel values
 STATUS_OK = "ok"
@@ -72,6 +84,16 @@ class SystemValueResult:
     system_name: str = ""
     total_value: int | None = None  # from top-level estimatedValue; None if unavailable/unknown
     valuable_bodies: list[dict] = field(default_factory=list)  # raw valuableBodies dicts
+
+
+@dataclass
+class SphereSystemsResult:
+    """Result of an EDSM sphere-systems (nearby systems) lookup."""
+
+    status: str  # STATUS_OK | STATUS_UNKNOWN | STATUS_UNAVAILABLE
+    system_name: str = ""
+    radius: int = 0
+    systems: list[dict] = field(default_factory=list)  # raw entries: name/distance/primaryStar
 
 
 class EdsmReadClient:
@@ -143,6 +165,36 @@ class EdsmReadClient:
 
         return self._parse_value_response(system_name, data)
 
+    def get_sphere_systems(
+        self, system_name: str, radius: int = DEFAULT_SPHERE_RADIUS,
+    ) -> SphereSystemsResult:
+        """Fetch nearby systems (with primary-star info) around ``system_name``.
+
+        Returns:
+          - STATUS_OK with the nearby systems list (including the queried
+            system itself, at distance 0) when EDSM can resolve the query
+          - STATUS_UNKNOWN when EDSM doesn't know the queried system
+          - STATUS_UNAVAILABLE on network/timeout/non-200/malformed response
+        """
+        params = {"systemName": system_name, "radius": radius, "showPrimaryStar": 1}
+        url = f"{EDSM_SPHERE_URL}?{urllib.parse.urlencode(params)}"
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": self._user_agent},
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=self._timeout, context=self._ssl_context) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            decky.logger.warning(f"EDSM sphere-systems fetch HTTP error for {system_name!r}: {e}")
+            return SphereSystemsResult(status=STATUS_UNAVAILABLE, system_name=system_name, radius=radius)
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+            decky.logger.warning(f"EDSM sphere-systems fetch failed for {system_name!r}: {e}")
+            return SphereSystemsResult(status=STATUS_UNAVAILABLE, system_name=system_name, radius=radius)
+
+        return self._parse_sphere_response(system_name, radius, data)
+
     @staticmethod
     def _parse_response(system_name: str, data: object) -> SystemBodiesResult:
         if not isinstance(data, dict):
@@ -190,3 +242,16 @@ class EdsmReadClient:
             total_value=total_value,
             valuable_bodies=valuable_bodies,
         )
+
+    @staticmethod
+    def _parse_sphere_response(system_name: str, radius: int, data: object) -> SphereSystemsResult:
+        if isinstance(data, list):
+            return SphereSystemsResult(
+                status=STATUS_OK, system_name=system_name, radius=radius, systems=data,
+            )
+        if isinstance(data, dict):
+            # EDSM returns {} when the queried system itself isn't known to it
+            # (or an out-of-range radius); either way there's nothing to search.
+            return SphereSystemsResult(status=STATUS_UNKNOWN, system_name=system_name, radius=radius)
+        decky.logger.warning(f"EDSM sphere-systems: unexpected response type for {system_name!r}")
+        return SphereSystemsResult(status=STATUS_UNAVAILABLE, system_name=system_name, radius=radius)

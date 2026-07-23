@@ -127,6 +127,11 @@ class EdsmNextHopConsumer:
         self._last_hop = None  # force a fresh emit for the current state
         self._reevaluate()
 
+    @property
+    def current_system(self) -> str:
+        """The last-known current system name (empty until the first arrival)."""
+        return self._current_system
+
     def get_stats(self) -> dict:
         return {}
 
