@@ -143,6 +143,19 @@ interface EdsmNextHopPreview {
 // Emitted as "edsm_next_hop" decky event on route change / after each jump.
 type EdsmNextHopEvent = EdsmNextHopPreview;
 
+// Result of the on-demand "nearest scoopable star" lookup (get_nearest_scoopable_star).
+// - "ok": system/distance/star_class are populated
+// - "none_found": sphere query ran but no scoopable star was within the radius
+//   (also covers the current system being unknown to EDSM — no data to search)
+// - "unavailable": the query failed (network/timeout) or the current system isn't known yet
+// - "disabled": EDSM auto-lookups are turned off; no request was made
+interface NearestScoopableStarResult {
+  status: "ok" | "none_found" | "unavailable" | "disabled";
+  system: string | null;
+  distance: number | null;
+  star_class: string | null;
+}
+
 interface GetStatusResult {
   ed_running: boolean;
   enabled: boolean;

@@ -1,0 +1,11 @@
+[
+  {"distance": 0, "bodyCount": 40, "name": "Sol", "primaryStar": {"type": "G (White-Yellow) Star", "name": "Sol", "isScoopable": true}},
+  {"distance": 5.95, "bodyCount": 16, "name": "Barnard's Star", "primaryStar": {"type": "M (Red dwarf) Star", "name": "Barnard's Star", "isScoopable": true}},
+  {"distance": 8.58, "bodyCount": 2, "name": "UV Ceti", "primaryStar": {"type": "M (Red dwarf) Star", "name": "UV Ceti B", "isScoopable": true}},
+  {"distance": 9.69, "bodyCount": 9, "name": "Ross 154", "primaryStar": {"type": "M (Red dwarf) Star", "name": "Ross 154", "isScoopable": true}},
+  {"distance": 10.37, "bodyCount": 20, "name": "Ross 248", "primaryStar": {"type": "M (Red dwarf) Star", "name": "Ross 248 A", "isScoopable": true}},
+  {"distance": 10.52, "bodyCount": 23, "name": "WISE 1506+7027", "primaryStar": {"type": "T (Brown dwarf) Star", "name": "WISE 1506+7027", "isScoopable": false}},
+  {"distance": 11.94, "bodyCount": 5, "name": "Tau Ceti", "primaryStar": {"type": "G (White-Yellow) Star", "name": "Tau Ceti", "isScoopable": true}},
+  {"distance": 13.91, "bodyCount": 12, "name": "van Maanen's Star", "primaryStar": {"type": "White Dwarf (D) Star", "name": "van Maanen's Star", "isScoopable": false}},
+  {"distance": 2, "bodyCount": 1, "name": "AssetViewerSystem", "primaryStar": {}}
+]

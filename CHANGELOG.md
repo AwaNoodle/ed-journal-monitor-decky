@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Nearest scoopable star lookup**: a new on-demand **Find Nearest Scoopable Star** action in the Session dashboard queries EDSM's `api-v1/sphere-systems` around the current system (bounded 25 ly radius, primary-star info) and reports the closest system with a fuel-scoopable (KGBFOAM) primary star — name, distance, and star class. Unlike the arrival-triggered worth-scanning/value/next-hop lookups, this is user-initiated only (a button, not fired on every jump) to keep sphere-query traffic minimal, and does not share the per-arrival cache since a radius query is point-in-time. Reuses the existing EDSM read client, custom User-Agent/SSL, and **Enable EDSM lookup** toggle — no new setting. Handles "none found within radius" and EDSM-unavailable explicitly rather than as errors. New `get_nearest_scoopable_star` callable.
+
 ## [0.6.0] - 2026-07-14
 
 ### Added

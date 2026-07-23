@@ -22,6 +22,7 @@ if str(_bin_dir) not in sys.path:
 from src.modules.activity_log import ActivityLog  # noqa: E402
 from src.modules.diagnostics import create_diagnostics as _create_diagnostics  # noqa: E402
 from src.modules.edsm_lookup_consumer import EdsmLookupConsumer  # noqa: E402
+from src.modules.edsm_nearest_scoopable_lookup import lookup_nearest_scoopable  # noqa: E402
 from src.modules.edsm_next_hop_consumer import (  # noqa: E402
     EdsmNextHopConsumer,
     neutral_next_hop,
@@ -52,6 +53,7 @@ class Plugin:
         self.edsm: EdsmForwarder | None = None
         self.edsm_lookup: EdsmLookupConsumer | None = None
         self.edsm_next_hop: EdsmNextHopConsumer | None = None
+        self.edsm_read_client: EdsmReadClient | None = None
         self.watcher: JournalWatcher | None = None
         # Stream consumers driven by lifecycle/stats fan-out (session stats,
         # EDSM forwarder, ...). The watcher fans observe() to the same list.
@@ -98,18 +100,18 @@ class Plugin:
         # Share one read client + per-system cache across both EDSM read
         # consumers, so a system previewed as a next hop is a cache hit once it
         # becomes the current system (and vice versa).
-        edsm_read_client = EdsmReadClient(ssl_context=build_ssl_context())
+        self.edsm_read_client = EdsmReadClient(ssl_context=build_ssl_context())
         edsm_cache = SystemLookupCache()
         self.edsm_lookup = EdsmLookupConsumer(
             settings=self.settings,
-            read_client=edsm_read_client,
+            read_client=self.edsm_read_client,
             cache=edsm_cache,
             on_verdict=self._on_edsm_verdict,
             on_value=self._on_edsm_value,
         )
         self.edsm_next_hop = EdsmNextHopConsumer(
             settings=self.settings,
-            read_client=edsm_read_client,
+            read_client=self.edsm_read_client,
             cache=edsm_cache,
             on_next_hop=self._on_edsm_next_hop,
         )
@@ -346,6 +348,23 @@ class Plugin:
         if not self.session_stats:
             return SessionStats().__dict__.copy()
         return self.session_stats.get_stats()
+
+    async def get_nearest_scoopable_star(self) -> dict:
+        """On-demand: find the nearest fuel-scoopable star from the current
+        system via an EDSM sphere-systems query. Gated by edsm_lookups_enabled;
+        makes no request when disabled or before the current system is known."""
+        current_system = self.edsm_next_hop.current_system if self.edsm_next_hop else ""
+        lookups_enabled = bool(self.settings.get("edsm_lookups_enabled", False)) if self.settings else False
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, lookup_nearest_scoopable, self.edsm_read_client, current_system, lookups_enabled,
+        )
+        return {
+            "status": result.status,
+            "system": result.system,
+            "distance": result.distance,
+            "star_class": result.star_class,
+        }
 
     # --- internal helpers ---
 

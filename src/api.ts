@@ -16,3 +16,4 @@ export const createDiagnosticsBundle = callable<[], DiagnosticsResult>("create_d
 export const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("get_recent_activity");
 export const getSessionStats = callable<[], SessionStats>("get_session_stats");
 export const setEdsmLookupsEnabled = callable<[boolean], BasicSuccessResult>("set_edsm_lookups_enabled");
+export const getNearestScoopableStar = callable<[], NearestScoopableStarResult>("get_nearest_scoopable_star");

@@ -12,6 +12,7 @@ import type { JSX } from "react";
 import {
   createDiagnosticsBundle,
   findJournalPath,
+  getNearestScoopableStar,
   getRecentActivity,
   getSessionStats,
   getStatus,
@@ -54,6 +55,8 @@ const Content = (): JSX.Element => {
   const [edsmLookupsEnabled, setEdsmLookupsEnabledState] = useState<boolean>(false);
   const [edsmWorthScanning, setEdsmWorthScanning] = useState<EdsmWorthScanningVerdict | null>(null);
   const [edsmNextHop, setEdsmNextHop] = useState<EdsmNextHopPreview | null>(null);
+  const [nearestScoopable, setNearestScoopable] = useState<NearestScoopableStarResult | null>(null);
+  const [nearestScoopableLoading, setNearestScoopableLoading] = useState<boolean>(false);
 
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
@@ -109,6 +112,7 @@ const Content = (): JSX.Element => {
       if (!data.ed_running) {
         setEdsmWorthScanning(null);
         setEdsmNextHop(null);
+        setNearestScoopable(null);
       }
     });
 
@@ -258,6 +262,16 @@ const Content = (): JSX.Element => {
     if (!state) {
       setEdsmWorthScanning(null);
       setEdsmNextHop(null);
+      setNearestScoopable(null);
+    }
+  };
+
+  const handleFindNearestScoopable = async (): Promise<void> => {
+    setNearestScoopableLoading(true);
+    try {
+      setNearestScoopable(await getNearestScoopableStar());
+    } finally {
+      setNearestScoopableLoading(false);
     }
   };
 
@@ -358,6 +372,71 @@ const Content = (): JSX.Element => {
       </>
     );
   };
+
+  // Result of the on-demand nearest-scoopable-star lookup. Renders nothing
+  // for the "disabled" status — the toggle-off path already clears
+  // nearestScoopable, and the button/hint above cover the disabled state.
+  const renderNearestScoopableResult = (): JSX.Element | null => {
+    if (!nearestScoopable) return null;
+    if (nearestScoopable.status === "ok") {
+      return (
+        <PanelSectionRow>
+          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Nearest scoopable star · EDSM
+            </span>
+            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+              {nearestScoopable.system}
+            </span>
+            <span style={{ fontSize: "12px", opacity: 0.8 }}>
+              {nearestScoopable.distance?.toFixed(2)} ly · {nearestScoopable.star_class}
+            </span>
+          </div>
+        </PanelSectionRow>
+      );
+    }
+    if (nearestScoopable.status === "none_found") {
+      return (
+        <PanelSectionRow>
+          <Field>⛽ No scoopable star found within the search radius</Field>
+        </PanelSectionRow>
+      );
+    }
+    if (nearestScoopable.status === "unavailable") {
+      return (
+        <PanelSectionRow>
+          <Field>⚠️ Lookup unavailable — try again</Field>
+        </PanelSectionRow>
+      );
+    }
+    return null;
+  };
+
+  // On-demand "help me now" action: finds the nearest fuel-scoopable star
+  // from the current system via an EDSM sphere-systems query. Gated by the
+  // same EDSM auto-lookup toggle as the passive verdict/next-hop features.
+  const renderNearestScoopable = (): JSX.Element => (
+    <>
+      <PanelSectionRow>
+        <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={(): void => { void handleFindNearestScoopable(); }}
+          disabled={!edsmLookupsEnabled || nearestScoopableLoading}
+        >
+          {nearestScoopableLoading ? "Searching…" : "Find Nearest Scoopable Star"}
+        </ButtonItem>
+      </PanelSectionRow>
+      {!edsmLookupsEnabled && (
+        <PanelSectionRow>
+          <Field>Enable EDSM lookup to use this action</Field>
+        </PanelSectionRow>
+      )}
+      {edsmLookupsEnabled && renderNearestScoopableResult()}
+    </>
+  );
 
   const handleCreateDiagnostics = async (): Promise<void> => {
     const result = await createDiagnosticsBundle();
@@ -463,6 +542,7 @@ const Content = (): JSX.Element => {
           </div>
         </PanelSectionRow>
         {renderNextHop()}
+        {renderNearestScoopable()}
       </>
     );
   };
