@@ -1,5 +1,5 @@
-import { definePlugin } from "@decky/api";
-import { staticClasses } from "@decky/ui";
+import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
+import { Navigation, QuickAccessTab, staticClasses } from "@decky/ui";
 import { FaSatelliteDish } from "react-icons/fa";
 import Content from "./Content";
 import {
@@ -10,6 +10,21 @@ import {
   startWatcher,
   stopWatcher,
 } from "./api";
+
+const formatCredits = (value: number): string => {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+};
+
+// Subtext carrying value + top priority bodies, or undefined when the payload
+// carries neutral value fields (rendering nothing rather than placeholder text).
+const worthScanningSubtext = (data: EdsmWorthScanningEvent): string | undefined => {
+  if (data.totalValue === null) return undefined;
+  const bodies = data.priorityBodies.map((b): string => `${b.name} (${formatCredits(b.value)})`).join(", ");
+  const value = `~${formatCredits(data.totalValue)} cr`;
+  return bodies ? `${value} · ${bodies}` : value;
+};
 
 // Elite Dangerous Steam AppID
 const ED_APP_ID = 359320;
@@ -136,6 +151,20 @@ export default definePlugin(() => {
     }
   })();
 
+  // Worth-scanning toast: registered here (not in Content.tsx) so it stays
+  // alive for the whole Steam session, not just while the panel is open. The
+  // backend decides notify — this listener only renders. Never fires from a
+  // status rehydration, only from the live emitted event.
+  const worthScanningListener = addEventListener("edsm_worth_scanning", (data: EdsmWorthScanningEvent): void => {
+    if (!data.notify) return;
+    toaster.toast({
+      title: "Worth scanning",
+      body: data.system,
+      subtext: worthScanningSubtext(data),
+      onClick: (): void => { Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky); },
+    });
+  });
+
   return {
     name: "ED Journal Monitor",
     titleView: <div className={staticClasses.Title}>ED Journal Monitor</div>,
@@ -146,6 +175,7 @@ export default definePlugin(() => {
       // Unregister all SteamClient listeners
       lifetimeRegistration?.unregister();
       resumeRegistration?.unregister();
+      removeEventListener("edsm_worth_scanning", worthScanningListener);
     },
   };
 });

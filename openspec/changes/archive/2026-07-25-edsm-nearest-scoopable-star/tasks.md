@@ -27,4 +27,4 @@
 - [x] 6.1 Run full pytest suite + lint/typecheck; all green
 - [x] 6.2 Manually verify: action returns a nearby scoopable star; none-found handled; toggle-off makes no call; submission unaffected
 - [x] 6.3 Update `README.md`, `CHANGELOG.md` (`[Unreleased]`), and `AGENTS.md`
-- [ ] 6.4 Open a PR; merge via squash-and-rebase
+- [x] 6.4 Open a PR; merge via squash-and-rebase

@@ -212,6 +212,12 @@ class Plugin:
             "edsm_commander_name": self.settings.get("edsm_commander_name", "") if self.settings else "",
             "edsm_api_key_set": bool(self.settings.get("edsm_api_key")) if self.settings else False,
             "edsm_lookups_enabled": bool(self.settings.get("edsm_lookups_enabled", False)) if self.settings else False,
+            "edsm_notifications_enabled": (
+                bool(self.settings.get("edsm_notifications_enabled", False)) if self.settings else False
+            ),
+            "edsm_notify_all_verdicts": (
+                bool(self.settings.get("edsm_notify_all_verdicts", False)) if self.settings else False
+            ),
             "enabled": self.settings.get("enabled", True) if self.settings else True,
             "detailed_logging": self.settings.get("detailed_logging", False) if self.settings else False,
             "edsm_worth_scanning": self._edsm_verdict,
@@ -273,6 +279,18 @@ class Plugin:
                 self.edsm_lookup.force_lookup(self.edsm_lookup._last_system)
             if self.edsm_next_hop is not None:
                 self.edsm_next_hop.reevaluate()
+        return {"success": True}
+
+    async def set_edsm_notifications_enabled(self, enabled: bool) -> dict:
+        """Enable or disable worth-scanning toast notifications. Independent of
+        the EDSM API key and of the EDDN/EDSM write paths."""
+        await self.settings.set("edsm_notifications_enabled", enabled)
+        return {"success": True}
+
+    async def set_edsm_notify_all_verdicts(self, enabled: bool) -> dict:
+        """Set the notification verdict threshold: False = green only, True =
+        green and yellow."""
+        await self.settings.set("edsm_notify_all_verdicts", enabled)
         return {"success": True}
 
     async def set_detailed_logging(self, enabled: bool) -> dict:
@@ -368,9 +386,13 @@ class Plugin:
 
     # --- internal helpers ---
 
-    def _on_edsm_verdict(self, system_name: str, verdict: str | None) -> None:
+    def _on_edsm_verdict(self, system_name: str, verdict: str | None, notify: bool) -> None:  # noqa: ARG002
         """Called by the lookup consumer when a verdict is ready.  Stores it for
-        get_status() rehydration and schedules a frontend emit."""
+        get_status() rehydration and schedules a frontend emit.
+
+        notify is intentionally not stored — a status fetch must never be able
+        to replay a notification, so the rehydration dict structurally cannot
+        carry the flag that triggers one."""
         self._edsm_verdict = {"system": system_name, "verdict": verdict, "source": "edsm"}
 
     def _on_edsm_value(self, system_name: str, value_payload: dict | None) -> None:

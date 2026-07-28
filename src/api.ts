@@ -17,3 +17,5 @@ export const getRecentActivity = callable<[number?, string?], ActivityEntry[]>("
 export const getSessionStats = callable<[], SessionStats>("get_session_stats");
 export const setEdsmLookupsEnabled = callable<[boolean], BasicSuccessResult>("set_edsm_lookups_enabled");
 export const getNearestScoopableStar = callable<[], NearestScoopableStarResult>("get_nearest_scoopable_star");
+export const setEdsmNotificationsEnabled = callable<[boolean], BasicSuccessResult>("set_edsm_notifications_enabled");
+export const setEdsmNotifyAllVerdicts = callable<[boolean], BasicSuccessResult>("set_edsm_notify_all_verdicts");

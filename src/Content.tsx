@@ -19,6 +19,8 @@ import {
   setDetailedLogging,
   setEdsmCredentials,
   setEdsmLookupsEnabled,
+  setEdsmNotificationsEnabled,
+  setEdsmNotifyAllVerdicts,
   setEnabled,
   setManualJournalPath,
   setUploaderId,
@@ -53,6 +55,8 @@ const Content = (): JSX.Element => {
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [edsmLookupsEnabled, setEdsmLookupsEnabledState] = useState<boolean>(false);
+  const [edsmNotificationsEnabled, setEdsmNotificationsEnabledState] = useState<boolean>(false);
+  const [edsmNotifyAllVerdicts, setEdsmNotifyAllVerdictsState] = useState<boolean>(false);
   const [edsmWorthScanning, setEdsmWorthScanning] = useState<EdsmWorthScanningVerdict | null>(null);
   const [edsmNextHop, setEdsmNextHop] = useState<EdsmNextHopPreview | null>(null);
   const [nearestScoopable, setNearestScoopable] = useState<NearestScoopableStarResult | null>(null);
@@ -80,6 +84,8 @@ const Content = (): JSX.Element => {
         setEdsmCommanderInput(status.edsm_commander_name);
         setEdsmApiKeySet(status.edsm_api_key_set);
         setEdsmLookupsEnabledState(status.edsm_lookups_enabled);
+        setEdsmNotificationsEnabledState(status.edsm_notifications_enabled);
+        setEdsmNotifyAllVerdictsState(status.edsm_notify_all_verdicts);
         setEdsmWorthScanning(status.edsm_worth_scanning);
         setEdsmNextHop(status.edsm_next_hop);
         setDetailedLoggingState(status.detailed_logging);
@@ -264,6 +270,16 @@ const Content = (): JSX.Element => {
       setEdsmNextHop(null);
       setNearestScoopable(null);
     }
+  };
+
+  const handleEdsmNotificationsToggle = async (state: boolean): Promise<void> => {
+    await setEdsmNotificationsEnabled(state);
+    setEdsmNotificationsEnabledState(state);
+  };
+
+  const handleEdsmNotifyAllVerdictsToggle = async (state: boolean): Promise<void> => {
+    await setEdsmNotifyAllVerdicts(state);
+    setEdsmNotifyAllVerdictsState(state);
   };
 
   const handleFindNearestScoopable = async (): Promise<void> => {
@@ -562,13 +578,6 @@ const Content = (): JSX.Element => {
           />
         </PanelSectionRow>
         <PanelSectionRow>
-          <ToggleField
-            label="Enable EDSM lookup"
-            checked={edsmLookupsEnabled}
-            onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
           <Field label="ED Status">
             {getEdStatusText()}
           </Field>
@@ -710,6 +719,33 @@ const Content = (): JSX.Element => {
           <div style={{ width: "100%", fontSize: "12px", opacity: 0.7, textAlign: "left", overflowWrap: "anywhere" }}>
             Generate your API key at {EDSM_API_KEY_URL}
           </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Enable EDSM lookup"
+            checked={edsmLookupsEnabled}
+            onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="'Worth-scanning' Notifications"
+            description="Toast over the running game on arrival in a worth-scanning system"
+            checked={edsmNotificationsEnabled}
+            disabled={!edsmLookupsEnabled}
+            onChange={(state: boolean): void => { void handleEdsmNotificationsToggle(state); }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Notify on partially-explored systems too"
+            checked={edsmNotifyAllVerdicts}
+            disabled={!edsmLookupsEnabled}
+            onChange={(state: boolean): void => { void handleEdsmNotifyAllVerdictsToggle(state); }}
+          />
         </PanelSectionRow>
       </PanelSection>
 

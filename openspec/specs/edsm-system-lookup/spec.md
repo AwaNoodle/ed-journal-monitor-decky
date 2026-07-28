@@ -179,3 +179,97 @@ When auto-lookups are enabled and a next hop exists, the plugin SHALL look up th
 
 - **WHEN** auto-lookups are disabled, there is no next hop, or the lookup fails
 - **THEN** the plugin SHALL expose a neutral "no preview" state
+
+### Requirement: Sphere-systems read
+
+The EDSM read client SHALL support querying `api-v1/sphere-systems` around a given system within a bounded radius, requesting primary-star information, using the same custom User-Agent, shared SSL context, and no API key as the other read calls. A failure MUST be contained (return unavailable, no raise, no submission impact).
+
+#### Scenario: Sphere query returns nearby systems
+
+- **WHEN** a sphere query is issued for the current system within the configured radius
+- **THEN** the client SHALL return the nearby systems with distance and primary-star information
+
+#### Scenario: Sphere query failure contained
+
+- **WHEN** the sphere query fails (network/timeout/non-200/malformed)
+- **THEN** the client SHALL return an unavailable result and SHALL NOT affect submission
+
+### Requirement: Nearest scoopable star lookup
+
+The plugin SHALL provide an on-demand lookup that finds, from a sphere query around the current system, the closest system whose primary star is scoopable (KGBFOAM), returning its system name, distance, and star class. The lookup MUST be gated by the EDSM auto-lookup toggle and MUST NOT run automatically on every arrival.
+
+#### Scenario: Nearest scoopable star found
+
+- **WHEN** the user invokes the nearest-scoopable-star lookup and the sphere result contains at least one scoopable primary star
+- **THEN** the plugin SHALL return the closest such system with its distance and star class
+
+#### Scenario: No scoopable star within radius
+
+- **WHEN** the sphere result contains no scoopable primary star within the radius
+- **THEN** the plugin SHALL return an explicit "none found within radius" result
+
+#### Scenario: Lookup blocked when disabled
+
+- **WHEN** the EDSM auto-lookup toggle is disabled
+- **THEN** invoking the nearest-scoopable-star lookup SHALL make no EDSM request and return a disabled state
+
+### Requirement: Notify flag on the worth-scanning payload
+
+The worth-scanning payload emitted on arrival SHALL carry a notify flag indicating whether this arrival warrants a user-facing notification, derived from the persisted notification settings and the derived verdict. The flag MUST be additive to the existing payload — the system, verdict, source, value, and priority-body fields, and all existing consumers of them, are unchanged.
+
+#### Scenario: Notify flag accompanies the verdict
+
+- **WHEN** an arrival lookup emits a worth-scanning payload
+- **THEN** the payload SHALL include a notify flag alongside the existing verdict fields
+
+#### Scenario: Existing payload fields unchanged
+
+- **WHEN** a consumer reads the system, verdict, source, value, or priority-body fields of the payload
+- **THEN** those fields SHALL have the same meaning and shape as before this change
+
+#### Scenario: Value-fetch failure still emits a notify decision
+
+- **WHEN** the verdict is derived but the estimated-value fetch fails
+- **THEN** the payload SHALL still carry a notify flag derived from the verdict, with neutral value fields
+
+### Requirement: Notify flag excluded from rehydration state
+
+The stored worth-scanning state used to rehydrate the panel on a status request MUST NOT include the notify flag, so that a status fetch structurally cannot cause a notification to be raised.
+
+#### Scenario: Stored verdict omits the flag
+
+- **WHEN** the backend stores the latest worth-scanning payload for rehydration
+- **THEN** the stored value SHALL omit the notify flag
+
+#### Scenario: Status response omits the flag
+
+- **WHEN** the frontend requests plugin status
+- **THEN** the returned worth-scanning state SHALL NOT contain a notify flag
+
+### Requirement: Notification does not affect lookup behaviour
+
+Adding the notify decision MUST NOT change when lookups fire, how they are cached, how failures are contained, or how submission proceeds. The decision is derived from an already-computed verdict and MUST NOT issue any additional network request.
+
+#### Scenario: No additional requests
+
+- **WHEN** the notify decision is computed for an arrival
+- **THEN** no EDSM request SHALL be issued beyond those the lookup already performs
+
+#### Scenario: Submission still unaffected
+
+- **WHEN** the notify decision is computed, at any setting combination
+- **THEN** EDDN submission and EDSM forwarding for the same events SHALL proceed unaffected
+
+### Requirement: Notification suppression is not deduplicated
+
+The notify decision SHALL be made per emitted verdict, with no additional per-session or per-system suppression beyond the lookup's existing guard against re-triggering for the system the player is already in. Re-entering a previously notified system after visiting another SHALL therefore notify again.
+
+#### Scenario: Revisited system notifies again
+
+- **WHEN** the player jumps from a notifying system to another system and then back, and both arrivals produce a notifying verdict
+- **THEN** a notification SHALL be raised on each arrival
+
+#### Scenario: No repeat while in the same system
+
+- **WHEN** further events are observed for the system the player is already in
+- **THEN** no additional worth-scanning payload — and therefore no additional notification — SHALL be produced
