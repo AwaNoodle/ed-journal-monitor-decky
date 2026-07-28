@@ -244,7 +244,7 @@ class TestStalenessGuard:
         consumer = EdsmLookupConsumer(
             settings=settings,
             read_client=mock_client,
-            on_verdict=lambda s, v: verdicts.append((s, v)),
+            on_verdict=lambda s, v, n: verdicts.append((s, v)),
         )
 
         # Player is now in Maia (jumped away while Sol lookup was in flight)
@@ -293,7 +293,7 @@ class TestUnavailableResult:
         consumer = EdsmLookupConsumer(
             settings=settings,
             read_client=mock_client,
-            on_verdict=lambda s, v: verdicts.append((s, v)),
+            on_verdict=lambda s, v, n: verdicts.append((s, v)),
         )
         consumer._last_system = "Sol"
 
@@ -432,3 +432,198 @@ class TestValueFetch:
         assert payload["verdict"] == "green"
         assert payload["totalValue"] == 1500
         assert payload["priorityBodies"] == [{"name": "Earth", "value": 900}]
+
+
+def _bodies_for_verdict(verdict: str) -> SystemBodiesResult:
+    """Bodies result shaped to make derive_verdict() produce the given verdict."""
+    if verdict == "green":
+        return SystemBodiesResult(status=STATUS_UNKNOWN, system_name="Sol")
+    if verdict == "yellow":
+        return SystemBodiesResult(
+            status=STATUS_OK,
+            system_name="Sol",
+            bodies=[
+                {"discovery": {"commander": "Jameson"}},
+                {},
+            ],
+            body_count=2,
+        )
+    if verdict == "red":
+        return SystemBodiesResult(
+            status=STATUS_OK,
+            system_name="Sol",
+            bodies=[{"discovery": {"commander": "Jameson"}}],
+            body_count=1,
+        )
+    raise ValueError(verdict)
+
+
+class TestNotifyDecision:
+    """Notify is derived from edsm_notifications_enabled + edsm_notify_all_verdicts + verdict.
+
+    Notify is true only for:
+      (notifications on, green-only, green)
+      (notifications on, all-verdicts, green)
+      (notifications on, all-verdicts, yellow)
+    Every other combination — including any combination with notifications off,
+    any red verdict, or a neutral (None) verdict — must be false.
+    """
+
+    def _consumer_for(
+        self, *, notifications_enabled: bool, notify_all: bool, verdict: str,
+    ) -> tuple[EdsmLookupConsumer, list]:
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": notifications_enabled,
+            "edsm_notify_all_verdicts": notify_all,
+        })
+        mock_client = MagicMock()
+        mock_client.get_system_bodies.return_value = _bodies_for_verdict(verdict)
+        mock_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        notifies: list[bool] = []
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_client,
+            on_verdict=lambda s, v, n: notifies.append(n),
+        )
+        consumer._last_system = "Sol"
+        return consumer, notifies
+
+    @pytest.mark.parametrize(
+        ("notifications_enabled", "notify_all", "verdict", "expected_notify"),
+        [
+            (False, False, "green", False),
+            (False, False, "yellow", False),
+            (False, False, "red", False),
+            (False, True, "green", False),
+            (False, True, "yellow", False),
+            (False, True, "red", False),
+            (True, False, "green", True),
+            (True, False, "yellow", False),
+            (True, False, "red", False),
+            (True, True, "green", True),
+            (True, True, "yellow", True),
+            (True, True, "red", False),
+        ],
+    )
+    def test_notify_matrix(self, notifications_enabled, notify_all, verdict, expected_notify):
+        consumer, notifies = self._consumer_for(
+            notifications_enabled=notifications_enabled, notify_all=notify_all, verdict=verdict,
+        )
+
+        consumer._do_lookup_sync("Sol")
+
+        assert notifies == [expected_notify]
+
+    def test_neutral_verdict_never_notifies(self):
+        """No verdict (bodies fetch unavailable) means no on_verdict call at all, so no notify."""
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": True,
+            "edsm_notify_all_verdicts": True,
+        })
+        mock_client = MagicMock()
+        mock_client.get_system_bodies.return_value = SystemBodiesResult(
+            status=STATUS_UNAVAILABLE, system_name="Sol"
+        )
+        mock_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        notifies: list[bool] = []
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_client,
+            on_verdict=lambda s, v, n: notifies.append(n),
+        )
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        assert notifies == []
+
+    def test_value_fetch_failure_still_derives_notify_from_verdict(self, mock_read_client):
+        """A contained value-fetch failure must not block the notify decision."""
+        mock_read_client.get_system_bodies.return_value = _bodies_for_verdict("green")
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNAVAILABLE, system_name="Sol"
+        )
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": True,
+            "edsm_notify_all_verdicts": False,
+        })
+        notifies: list[bool] = []
+        values: list = []
+        consumer = EdsmLookupConsumer(
+            settings=settings,
+            read_client=mock_read_client,
+            on_verdict=lambda s, v, n: notifies.append(n),
+            on_value=lambda s, v: values.append(v),
+        )
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        assert notifies == [True]
+        assert values == [None]
+
+    def test_notify_computation_issues_no_additional_edsm_request(self, mock_read_client):
+        """Computing notify must not call the read client beyond the lookup's own bodies+value fetch."""
+        mock_read_client.get_system_bodies.return_value = _bodies_for_verdict("green")
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": True,
+            "edsm_notify_all_verdicts": True,
+        })
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client)
+        consumer._last_system = "Sol"
+
+        consumer._do_lookup_sync("Sol")
+
+        mock_read_client.get_system_bodies.assert_called_once_with("Sol")
+        mock_read_client.get_estimated_value.assert_called_once_with("Sol")
+
+    @pytest.mark.asyncio
+    async def test_emitted_payload_carries_notify_flag(self, mock_read_client):
+        mock_read_client.get_system_bodies.return_value = _bodies_for_verdict("green")
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": True,
+            "edsm_notify_all_verdicts": False,
+        })
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client)
+        consumer._last_system = "Sol"
+
+        with patch("src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock) as mock_emit:
+            await consumer._lookup_async("Sol")
+
+        _event_name, payload = mock_emit.call_args.args
+        assert payload["notify"] is True
+
+    @pytest.mark.asyncio
+    async def test_emitted_payload_notify_false_when_disabled(self, mock_read_client):
+        mock_read_client.get_system_bodies.return_value = _bodies_for_verdict("green")
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_UNKNOWN, system_name="Sol"
+        )
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": False,
+            "edsm_notify_all_verdicts": True,
+        })
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client)
+        consumer._last_system = "Sol"
+
+        with patch("src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock) as mock_emit:
+            await consumer._lookup_async("Sol")
+
+        _event_name, payload = mock_emit.call_args.args
+        assert payload["notify"] is False

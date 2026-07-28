@@ -56,7 +56,7 @@ class EdsmLookupConsumer:
         settings: PluginSettings,
         read_client: EdsmReadClient | None = None,
         cache: SystemLookupCache | None = None,
-        on_verdict: Callable[[str, str | None], None] | None = None,
+        on_verdict: Callable[[str, str | None, bool], None] | None = None,
         on_value: Callable[[str, dict | None], None] | None = None,
     ) -> None:
         self._settings = settings
@@ -133,7 +133,8 @@ class EdsmLookupConsumer:
             return
         if system_name != self._last_system:
             return
-        self._emit_verdict(system_name, verdict)
+        notify = self._compute_notify(verdict)
+        self._emit_verdict(system_name, verdict, notify)
         self._emit_value(system_name, value_summary)
 
     async def _lookup_async(self, system_name: str) -> None:
@@ -149,12 +150,14 @@ class EdsmLookupConsumer:
                 return
             if system_name != self._last_system:
                 return
-            self._emit_verdict(system_name, verdict)
+            notify = self._compute_notify(verdict)
+            self._emit_verdict(system_name, verdict, notify)
             self._emit_value(system_name, value_summary)
             await decky.emit(VERDICT_EVENT, {
                 "system": system_name,
                 "verdict": verdict,
                 "source": "edsm",
+                "notify": notify,
                 **self._value_fields(value_summary),
             })
         except asyncio.CancelledError:
@@ -200,11 +203,26 @@ class EdsmLookupConsumer:
             self._cache.set_value(system_name, result)
         return result
 
-    def _emit_verdict(self, system_name: str, verdict: str | None) -> None:
+    def _compute_notify(self, verdict: str | None) -> bool:
+        """Whether this verdict should raise a user-facing notification.
+
+        Derived entirely from the already-computed verdict and the persisted
+        settings — issues no additional EDSM request. Red and neutral verdicts
+        never notify at either threshold.
+        """
+        if not self._settings.get("edsm_notifications_enabled", False):
+            return False
+        if verdict == "green":
+            return True
+        if verdict == "yellow":
+            return bool(self._settings.get("edsm_notify_all_verdicts", False))
+        return False
+
+    def _emit_verdict(self, system_name: str, verdict: str | None, notify: bool) -> None:
         """Call the optional on_verdict callback (used in main.py for session state)."""
         if self._on_verdict is not None:
             try:
-                self._on_verdict(system_name, verdict)
+                self._on_verdict(system_name, verdict, notify)
             except Exception as e:
                 decky.logger.error(f"EDSM verdict callback error: {e}")
 

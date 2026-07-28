@@ -121,8 +121,11 @@ interface EdsmWorthScanningVerdict {
   priorityBodies: EdsmPriorityBody[];
 }
 
-// Emitted as "edsm_worth_scanning" decky event on each arrival.
-type EdsmWorthScanningEvent = EdsmWorthScanningVerdict;
+// Emitted as "edsm_worth_scanning" decky event on each arrival. notify is the
+// backend's notification decision (persisted settings + verdict) — present
+// only on the live event, never on the get_status-rehydrated verdict, so a
+// status refresh can never replay a toast.
+type EdsmWorthScanningEvent = EdsmWorthScanningVerdict & { notify?: boolean };
 
 // Next-in-route hop preview for the next system in the plotted route.
 // system is null in the neutral state (no route, no next hop, or disabled).
@@ -169,6 +172,8 @@ interface GetStatusResult {
   edsm_commander_name: string;
   edsm_api_key_set: boolean;
   edsm_lookups_enabled: boolean;
+  edsm_notifications_enabled: boolean;
+  edsm_notify_all_verdicts: boolean;
   detailed_logging: boolean;
   edsm_worth_scanning: EdsmWorthScanningVerdict | null;
   edsm_next_hop: EdsmNextHopPreview | null;
