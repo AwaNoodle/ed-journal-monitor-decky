@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-28
+
 ### Added
 
 - **Worth-scanning arrival notifications**: a Steam toast now fires on arrival in a system worth scanning, visible over the running game without opening the quick access menu. Off by default; enabled via a new **'Worth-scanning' Notifications** toggle in the EDSM section, alongside a second toggle setting the threshold (green-only, the default, or green + yellow). Red and neutral verdicts never notify. The decision is computed entirely in the backend from the persisted settings and the already-derived verdict — no extra EDSM requests — and travels to the frontend as a `notify` flag on the `edsm_worth_scanning` event; the flag is deliberately excluded from the `get_status` rehydration payload so opening or refreshing the panel can never replay a toast. Tapping the toast opens the plugin's quick access tab. No sound, no custom duration, and no dedupe beyond the existing per-arrival guard (revisiting a system after leaving it notifies again — documented limitation, not a bug). New `set_edsm_notifications_enabled` / `set_edsm_notify_all_verdicts` callables and `edsm_notifications_enabled` / `edsm_notify_all_verdicts` settings. The EDSM credentials, auto-lookup toggle, and these two notification toggles are now grouped together under a single EDSM settings section.
