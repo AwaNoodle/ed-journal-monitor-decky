@@ -7,16 +7,16 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 ## Features
 
-- **Live session dashboard**: A glanceable summary of your current ED game launch — current system, jumps, distance travelled, bodies scanned, and first discoveries — updated live at the top of the panel
+- **Live session dashboard**: A glanceable summary of your current ED game launch — current system, jumps, distance travelled, bodies scanned, and first discoveries — always visible at the top of the panel, no expanding required
 - **Hands-off operation**: Automatically detects when Elite Dangerous starts and stops, beginning/ending journal monitoring accordingly
 - **Auto-discovery**: Finds the ED journal directory by scanning Steam's library configuration — no manual setup required for Steam installs
 - **EDDN submission**: Validates and submits journal/1 events plus Market/Outfitting/Shipyard auxiliary schemas to EDDN
 - **EDSM forwarding (opt-in)**: Optionally forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile under your own credentials, alongside and fully isolated from EDDN. Off by default — EDSM uploads are identifiable (tied to your named account), so you enable it by entering an API key
-- **EDSM worth-scanning lookup (opt-in)**: On arrival in a system, looks up EDSM's public body data and displays a glanceable chip in the Session dashboard — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). Labelled as EDSM-sourced; no API key required. Off by default; enable it with the **Enable EDSM lookup** toggle in the EDSM section
+- **EDSM worth-scanning lookup (opt-in)**: On arrival in a system, looks up EDSM's public body data and displays a glanceable chip in the Navigation section — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). Labelled as EDSM-sourced; no API key required. Off by default; enable it with the **Enable EDSM lookup** toggle in Setup ▸ EDSM lookups
 - **EDSM system value lookup (opt-in)**: Alongside the worth-scanning chip, shows the arrived system's EDSM-estimated scan value and its top priority (highest-value) bodies. The figure is a floor — EDSM's known bodies only, no first-mapped bonus. Shares the same lookup, cache, and **Enable EDSM lookup** toggle as the worth-scanning chip; no separate setting
-- **EDSM next-in-route hop preview (opt-in)**: When you plot a route, the Session dashboard previews the **next hop** before you jump — the next system's name, its primary-star **scoopability** (fuel safety, from the plotted route's star class), and its EDSM verdict/value when available. Derived from `NavRoute.json`, advances after each jump, and updates live when you re-plot. Shares the same read client, cache, and **Enable EDSM lookup** toggle; the previewed system is usually already cached by the time you arrive
-- **Worth-scanning notifications (opt-in)**: A Steam toast on arrival in a system worth scanning, visible over the running game without opening the quick access menu — the point being to decide whether to honk without leaving the cockpit. Off by default; enable with the **'Worth-scanning' Notifications** toggle in the EDSM section. A second toggle controls the threshold: green-only (default) or green **and** yellow. Red and neutral verdicts never notify. Tapping the toast opens the plugin's quick access tab. No sound and no dedupe — see [Configuration](#worth-scanning-notifications-optional) for details and limitations
-- **Nearest scoopable star (opt-in, on demand)**: A **Find Nearest Scoopable Star** button in the Session dashboard queries EDSM's `sphere-systems` endpoint around your current system (bounded 25 ly radius) and reports the closest system with a fuel-scoopable (KGBFOAM) primary star — name, distance, and star class. Triggered on demand only (not on every arrival) to keep sphere-query traffic minimal; gated by the same **Enable EDSM lookup** toggle. Handles "none found nearby" explicitly rather than showing an error
+- **EDSM next-in-route hop preview (opt-in)**: When you plot a route, the Navigation section previews the **next hop** before you jump — the next system's name, its primary-star **scoopability** (fuel safety, from the plotted route's star class), and its EDSM verdict/value when available. Derived from `NavRoute.json`, advances after each jump, and updates live when you re-plot. Always shown — states plainly when there's no route, you've reached the destination, you're off route, or lookups are disabled. Shares the same read client, cache, and **Enable EDSM lookup** toggle; the previewed system is usually already cached by the time you arrive
+- **Worth-scanning notifications (opt-in)**: A Steam toast on arrival in a system worth scanning, visible over the running game without opening the quick access menu — the point being to decide whether to honk without leaving the cockpit. Off by default; enable with the **'Worth-scanning' Notifications** toggle in Setup ▸ EDSM lookups. A second toggle controls the threshold: green-only (default) or green **and** yellow. Red and neutral verdicts never notify. Tapping the toast opens the plugin's quick access tab. No sound and no dedupe — see [Configuration](#worth-scanning-notifications-optional) for details and limitations
+- **Nearest scoopable star (opt-in, on demand)**: A **Find Nearest Scoopable Star** button in the Navigation section queries EDSM's `sphere-systems` endpoint around your current system (bounded 25 ly radius) and reports the closest system with a fuel-scoopable (KGBFOAM) primary star — name, distance, and star class. Triggered on demand only (not on every arrival) to keep sphere-query traffic minimal. If EDSM lookups are off, pressing the button turns them on and runs the search in one action. Handles "none found nearby" explicitly rather than showing an error
 - **No root access required**: All operations use user-accessible filesystem paths
 - **Steam Deck optimized**: Lightweight polling-based watcher (default 10s interval), minimal resource usage
 - **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
@@ -46,15 +46,14 @@ A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam De
 
 ## UI Panel
 
-The Decky plugin panel has seven sections:
+The panel is ordered by how often you actually look at each part, not by subject. A single-line **health strip** at the top and the **Navigation** and **Session** sections below it are always visible; everything configured once and rarely revisited lives behind collapsible sections further down, so reaching in-flight information never means scrolling or navigating past setup controls.
 
-- **Session**: A live, player-facing summary of the current ED game launch — a 2×2 grid of counters (jumps, distance in ly, bodies scanned, first discoveries), then a **Current location** block showing the current system, an optional EDSM worth-scanning chip (green/yellow/red, EDSM-attributed), and an optional EDSM system value display (estimated total value + top priority bodies). When a route is plotted, a **Next hop** block previews the next system in the route — its name, scoopability (fuel safety), and EDSM verdict/value when available — and advances after each jump. A **Find Nearest Scoopable Star** button and result display let you look up the closest fuel-scoopable system on demand. Resets on each game launch; shows a neutral empty state before any events are seen. The chip, value display, next-hop preview, and nearest-scoopable action only appear/work when EDSM lookup is enabled.
-- **Status**: **Watch journal** toggle, ED status (running/not running), Journal status (watching/found/not found), **per-target upload counts** (✅ success / ❌ failed for each of EDDN and EDSM), and a compact EDSM status block (counts + last response message, or an inactive notice when no API key is set)
-- **Configuration**: Journal path display, path source (auto/manual), re-scan button, manual journal path input, EDDN uploader ID input, notification when no uploader ID is set
-- **EDSM**: EDSM commander name + API key inputs (with an identifiability/consent notice and a link to where the key is generated) and an inactive notice when no API key is set, plus the **Enable EDSM lookup** toggle, the **'Worth-scanning' Notifications** toggle, and the green-only/all-verdicts threshold toggle — the two notification toggles are shown inactive when EDSM lookup is off
-- **Recent Errors**: Last 5 failed uploads with event type, timestamp, error classification, error message, and HTTP status
-- **Recent Activity**: Last 10 upload attempts with success/failure indicator, event type, and timestamp
-- **Diagnostics**: Detailed logging toggle, create diagnostic bundle button, bundle result (path + size)
+- **Health strip**: One always-visible line reporting the most urgent status — watching, waiting for Elite Dangerous, paused, running-but-not-watching, or no journal path configured (with a pointer to Setup)
+- **Navigation**: The current system, an optional EDSM worth-scanning chip (green/yellow/red, EDSM-attributed), and an optional EDSM system value display (estimated total value + top priority bodies). A **Next hop** block previews the next system in the plotted route — name, scoopability (fuel safety), and EDSM verdict/value when available — and is always shown, stating why there's no preview (no route plotted, destination reached, off route, or lookups disabled) when there isn't one. A **Find Nearest Scoopable Star** button looks up the closest fuel-scoopable system on demand; if EDSM lookups are off, pressing it turns them on and runs the search in the same action
+- **Session**: A 2×2 grid of counters — jumps, distance in ly, bodies scanned, first discoveries. Resets on each game launch; shows a neutral empty state before any events are seen
+- **Data flow** *(collapsed by default; expands automatically if there are failed uploads)*: Per-target upload counts (✅ success / ❌ failed for each of EDDN and EDSM), and a single time-ordered feed of the last 10 upload attempts — successes and failures together, each tagged with its target and, for failures, the error classification, message, and HTTP status. The collapsed header shows the aggregate success/failure counts
+- **Setup** *(collapsed by default)*: Four independently-expandable groups — **Journal path** (the **Watch journal** toggle, path display, path source, re-scan button, manual path input), **EDDN** (uploader ID input, notice when unset), **EDSM account** (commander name + API key inputs, identifiability notice, link to where the key is generated, status), and **EDSM lookups** (the **Enable EDSM lookup** toggle, the **'Worth-scanning' Notifications** toggle, and the green-only/all-verdicts threshold toggle)
+- **Troubleshooting** *(collapsed by default)*: Detailed logging toggle, create diagnostic bundle button, bundle result (path + size)
 
 
 ## Configuration
@@ -63,7 +62,7 @@ On first launch, the plugin will automatically scan for your Elite Dangerous jou
 
 ### Enable/Disable Monitor
 
-Toggle the monitor on/off from the **Enabled** toggle at the top of the plugin panel. When disabled, the watcher will not start even if ED is running.
+Toggle the monitor on/off from the **Watch journal** toggle in Setup ▸ Journal path. When disabled, the watcher will not start even if ED is running; the health strip at the top of the panel shows watching as paused.
 
 ### Manual Journal Path
 
@@ -92,16 +91,16 @@ You can also set it manually in the plugin settings. EDDN recommends using your 
 
 The plugin can also forward your journal events to your [EDSM](https://www.edsm.net/) profile, in addition to EDDN. This is **opt-in and off by default**: unlike EDDN's anonymous, hashed uploader IDs, **EDSM uploads are identifiable** — they are tied to your named EDSM account and land on your public/private commander profile (flight logs, visited systems, scans).
 
-To enable it, open the **EDSM** section of the panel and enter:
+To enable it, open **Setup ▸ EDSM account** and enter:
 
 1. **EDSM Commander Name** — your commander name as registered on EDSM.
 2. **EDSM API Key** — generated at **Settings → My API Key** on EDSM: <https://www.edsm.net/en/settings/api>
 
-The key's presence is the consent gate — once a key is saved, EDSM forwarding activates on the next game session. EDSM forwarding is fully isolated from EDDN: an EDSM error (e.g. wrong credentials, surfaced as a "check your EDSM credentials" message) never affects EDDN submission, and vice-versa. Only the Live game version is forwarded (Legacy is not). The EDSM status block shows EDSM's own success/fail counts and last response message.
+The key's presence is the consent gate — once a key is saved, EDSM forwarding activates on the next game session. EDSM forwarding is fully isolated from EDDN: an EDSM error (e.g. wrong credentials, surfaced as a "check your EDSM credentials" message) never affects EDDN submission, and vice-versa. Only the Live game version is forwarded (Legacy is not). The EDSM account status line shows EDSM's own success/fail counts and last response message. Note that EDSM lookups (the worth-scanning chip, next-hop preview, nearest-scoopable search) live in the separate **Setup ▸ EDSM lookups** group and don't require this API key — only this write/forwarding path does.
 
 ### Worth-Scanning Notifications (optional)
 
-When **Enable EDSM lookup** is on, the plugin can also raise a Steam toast on arrival in a system worth scanning — visible over the running game, no need to open the quick access menu. Off by default; enable it with the **'Worth-scanning' Notifications** toggle in the **EDSM** section. A second toggle sets the threshold: off (default) notifies on fully unexplored (green) systems only; on also notifies on partially-explored (yellow) systems. Fully-explored (red) and neutral verdicts never notify. Tapping the toast opens the plugin's quick access tab so you can read the full breakdown.
+When **Enable EDSM lookup** is on, the plugin can also raise a Steam toast on arrival in a system worth scanning — visible over the running game, no need to open the quick access menu. Off by default; enable it with the **'Worth-scanning' Notifications** toggle in **Setup ▸ EDSM lookups**. A second toggle sets the threshold: off (default) notifies on fully unexplored (green) systems only; on also notifies on partially-explored (yellow) systems. Fully-explored (red) and neutral verdicts never notify. Tapping the toast opens the plugin's quick access tab so you can read the full breakdown.
 
 Two things to know:
 
@@ -110,11 +109,11 @@ Two things to know:
 
 ### Detailed Logging
 
-Toggle **Detailed Logging** in the Diagnostics section to switch between INFO and DEBUG log verbosity. DEBUG logging produces richer diagnostic output for troubleshooting. This setting persists across restarts.
+Toggle **Detailed Logging** in the Troubleshooting section to switch between INFO and DEBUG log verbosity. DEBUG logging produces richer diagnostic output for troubleshooting. This setting persists across restarts.
 
 ## Verifying Your Submissions
 
-Once Elite Dangerous is running and the plugin shows **Journal: Watching**, your events should be submitted automatically. Here are a few ways to confirm your data is reaching EDDN:
+Once Elite Dangerous is running and the plugin's health strip shows **Watching**, your events should be submitted automatically. Here are a few ways to confirm your data is reaching EDDN:
 
 - **[EDDN Status Page](https://eddn.edcd.io/)** — Shows a live feed of all EDDN submissions across all users. Look for your `uploaderID` (your CMDR name) in the messages.
 - **EDSM** — If your EDSM account is linked, visit your commander profile on [edsm.net](https://www.edsm.net/) and check that your recent jumps and scans appear.
@@ -180,7 +179,7 @@ See [troubleshooting.md](troubleshooting.md) for common issues and solutions.
 
 ## Diagnostic Bundle
 
-The **Create Diagnostic Bundle** button in the Diagnostics section creates a zip file at `$DECKY_PLUGIN_SETTINGS_DIR/ed-jm-diagnostics.zip` containing:
+The **Create Diagnostic Bundle** button in the Troubleshooting section creates a zip file at `$DECKY_PLUGIN_SETTINGS_DIR/ed-jm-diagnostics.zip` containing:
 
 | File | Contents |
 |------|----------|

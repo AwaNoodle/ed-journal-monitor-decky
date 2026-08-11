@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from conftest import MockSettings
 
+from src.modules.edsm_next_hop import REASON_FINAL_HOP, REASON_HOP, REASON_NO_ROUTE, REASON_OFF_ROUTE
 from src.modules.edsm_next_hop_consumer import EdsmNextHopConsumer
 from src.modules.edsm_read_client import (
     STATUS_OK,
@@ -78,6 +79,7 @@ class TestPreviewProduced:
         assert payload["source"] == "edsm"
         assert payload["totalValue"] is None
         assert payload["priorityBodies"] == []
+        assert payload["reason"] == REASON_HOP
 
     def test_preview_includes_value_when_available(self):
         client = MagicMock()
@@ -139,18 +141,21 @@ class TestNeutralStates:
         assert captured[-1]["system"] is None
         assert captured[-1]["scoopable"] is None
         assert captured[-1]["verdict"] is None
+        assert captured[-1]["reason"] == REASON_NO_ROUTE
 
     def test_final_hop_emits_neutral(self):
         consumer, captured = _make()
         consumer.on_nav_route(_route())
         consumer.observe(_event("FSDJump", "Wolf 359"))  # final hop
         assert captured[-1]["system"] is None
+        assert captured[-1]["reason"] == REASON_FINAL_HOP
 
     def test_off_route_emits_neutral(self):
         consumer, captured = _make()
         consumer.on_nav_route(_route())
         consumer.observe(_event("FSDJump", "Betelgeuse"))
         assert captured[-1]["system"] is None
+        assert captured[-1]["reason"] == REASON_OFF_ROUTE
 
     def test_repeated_neutral_not_re_emitted(self):
         consumer, captured = _make()

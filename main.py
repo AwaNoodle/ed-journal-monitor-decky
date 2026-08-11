@@ -268,12 +268,13 @@ class Plugin:
         await self.settings.set("edsm_lookups_enabled", enabled)
         if not enabled:
             self._edsm_verdict = None
-            self._edsm_next_hop = None
+            next_hop_payload = neutral_next_hop()
+            self._edsm_next_hop = next_hop_payload
             await decky.emit("edsm_worth_scanning", {
                 "verdict": None, "system": None, "source": "edsm",
                 "totalValue": None, "priorityBodies": [],
             })
-            await decky.emit("edsm_next_hop", neutral_next_hop())
+            await decky.emit("edsm_next_hop", next_hop_payload)
         else:
             if self.edsm_lookup is not None:
                 self.edsm_lookup.force_lookup(self.edsm_lookup._last_system)
@@ -324,12 +325,13 @@ class Plugin:
             await decky.emit("status_update", self._build_target_stats())
         else:
             self._edsm_verdict = None
-            self._edsm_next_hop = None
+            next_hop_payload = neutral_next_hop()
+            self._edsm_next_hop = next_hop_payload
             await decky.emit("edsm_worth_scanning", {
                 "verdict": None, "system": None, "source": "edsm",
                 "totalValue": None, "priorityBodies": [],
             })
-            await decky.emit("edsm_next_hop", neutral_next_hop())
+            await decky.emit("edsm_next_hop", next_hop_payload)
         await decky.emit("ed_state_change", {"ed_running": enabled})
         return {"success": True}
 
@@ -412,9 +414,9 @@ class Plugin:
     def _on_edsm_next_hop(self, payload: dict) -> None:
         """Called by the next-hop consumer with a preview (or a neutral payload).
 
-        Stores it for get_status() rehydration; a neutral payload (system None)
-        is stored as None so get_status mirrors the verdict's neutral state."""
-        self._edsm_next_hop = payload if payload.get("system") else None
+        Stored as-is for get_status() rehydration — including a neutral
+        payload — so its `reason` discriminator survives a status refresh."""
+        self._edsm_next_hop = payload
 
     def _build_target_stats(self) -> dict:
         """Aggregate per-target upload stats by iterating the consumer registry.

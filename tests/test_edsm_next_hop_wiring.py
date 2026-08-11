@@ -55,14 +55,29 @@ async def test_get_status_exposes_next_hop():
 
 
 @pytest.mark.asyncio
-async def test_callback_stores_none_for_neutral_payload():
+async def test_callback_stores_payload_unchanged():
+    """`_on_edsm_next_hop` stores whatever it's given, including a neutral
+    payload — so its `reason` discriminator survives get_status rehydration."""
     plugin = await _make_plugin()
     plugin._on_edsm_next_hop({"system": "Sol", "scoopable": True})
-    assert plugin._edsm_next_hop is not None
+    assert plugin._edsm_next_hop == {"system": "Sol", "scoopable": True}
 
     from src.modules.edsm_next_hop_consumer import neutral_next_hop
-    plugin._on_edsm_next_hop(neutral_next_hop())
-    assert plugin._edsm_next_hop is None
+    neutral = neutral_next_hop("final_hop")
+    plugin._on_edsm_next_hop(neutral)
+    assert plugin._edsm_next_hop == neutral
+    assert plugin._edsm_next_hop["reason"] == "final_hop"
+
+
+@pytest.mark.asyncio
+async def test_get_status_rehydration_preserves_reason():
+    plugin = await _make_plugin()
+    from src.modules.edsm_next_hop_consumer import neutral_next_hop
+    plugin._on_edsm_next_hop(neutral_next_hop("off_route"))
+
+    status = await plugin.get_status()
+    assert status["edsm_next_hop"]["reason"] == "off_route"
+    assert status["edsm_next_hop"]["system"] is None
 
 
 @pytest.mark.asyncio
@@ -73,7 +88,8 @@ async def test_toggle_off_clears_and_emits_neutral_next_hop():
     with patch("decky.emit", new_callable=AsyncMock) as mock_emit:
         await plugin.set_edsm_lookups_enabled(False)
 
-    assert plugin._edsm_next_hop is None
+    assert plugin._edsm_next_hop["system"] is None
+    assert plugin._edsm_next_hop["reason"] == "disabled"
     events = [c.args[0] for c in mock_emit.call_args_list]
     assert "edsm_next_hop" in events
 
@@ -87,7 +103,8 @@ async def test_ed_stop_clears_and_emits_neutral_next_hop():
     with patch("decky.emit", new_callable=AsyncMock) as mock_emit:
         await plugin.set_ed_running(False)
 
-    assert plugin._edsm_next_hop is None
+    assert plugin._edsm_next_hop["system"] is None
+    assert plugin._edsm_next_hop["reason"] == "disabled"
     events = [c.args[0] for c in mock_emit.call_args_list]
     assert "edsm_next_hop" in events
 

@@ -13,7 +13,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.edsm_next_hop import NextHopTracker, is_scoopable
+from src.modules.edsm_next_hop import (
+    REASON_FINAL_HOP,
+    REASON_HOP,
+    REASON_NO_ROUTE,
+    REASON_OFF_ROUTE,
+    NextHopTracker,
+    is_scoopable,
+)
 
 
 def _route() -> list[dict]:
@@ -29,46 +36,55 @@ class TestNextHopDerivation:
     def test_mid_route_next_hop(self):
         tracker = NextHopTracker()
         tracker.set_route(_route())
-        hop = tracker.next_hop("Sol")
+        hop, reason = tracker.next_hop("Sol")
         assert hop is not None
         assert hop.system == "Alpha Centauri"
         assert hop.system_address == 55230754
         assert hop.star_class == "B"
         assert hop.scoopable is True
+        assert reason == REASON_HOP
 
     def test_final_hop_has_no_next(self):
         tracker = NextHopTracker()
         tracker.set_route(_route())
-        assert tracker.next_hop("Wolf 359") is None
+        hop, reason = tracker.next_hop("Wolf 359")
+        assert hop is None
+        assert reason == REASON_FINAL_HOP
 
     def test_no_route(self):
         tracker = NextHopTracker()
-        assert tracker.next_hop("Sol") is None
+        hop, reason = tracker.next_hop("Sol")
+        assert hop is None
+        assert reason == REASON_NO_ROUTE
         assert tracker.has_route is False
 
     def test_empty_route(self):
         tracker = NextHopTracker()
         tracker.set_route([])
-        assert tracker.next_hop("Sol") is None
+        hop, reason = tracker.next_hop("Sol")
+        assert hop is None
+        assert reason == REASON_NO_ROUTE
 
     def test_off_route_current_system(self):
         tracker = NextHopTracker()
         tracker.set_route(_route())
-        assert tracker.next_hop("Betelgeuse") is None
+        hop, reason = tracker.next_hop("Betelgeuse")
+        assert hop is None
+        assert reason == REASON_OFF_ROUTE
 
     def test_advance_after_jump(self):
         tracker = NextHopTracker()
         tracker.set_route(_route())
-        assert tracker.next_hop("Sol").system == "Alpha Centauri"
+        assert tracker.next_hop("Sol")[0].system == "Alpha Centauri"
         # Player jumps to Alpha Centauri; the next hop advances.
-        assert tracker.next_hop("Alpha Centauri").system == "Barnard's Star"
+        assert tracker.next_hop("Alpha Centauri")[0].system == "Barnard's Star"
         # And again.
-        assert tracker.next_hop("Barnard's Star").system == "Wolf 359"
+        assert tracker.next_hop("Barnard's Star")[0].system == "Wolf 359"
 
     def test_next_hop_carries_non_scoopable_star(self):
         tracker = NextHopTracker()
         tracker.set_route(_route())
-        hop = tracker.next_hop("Barnard's Star")  # next is Wolf 359, class N
+        hop, _reason = tracker.next_hop("Barnard's Star")  # next is Wolf 359, class N
         assert hop.system == "Wolf 359"
         assert hop.scoopable is False
 
@@ -80,20 +96,22 @@ class TestNextHopDerivation:
             {"StarSystem": "Second", "SystemAddress": 2, "StarClass": "K"},
             {"StarSystem": "Dupe", "SystemAddress": 3, "StarClass": "M"},
         ])
-        hop = tracker.next_hop("Dupe", current_address=1)
+        hop, _reason = tracker.next_hop("Dupe", current_address=1)
         assert hop.system == "Second"
 
     def test_clear_forgets_route(self):
         tracker = NextHopTracker()
         tracker.set_route(_route())
         tracker.clear()
-        assert tracker.next_hop("Sol") is None
+        hop, reason = tracker.next_hop("Sol")
+        assert hop is None
+        assert reason == REASON_NO_ROUTE
         assert tracker.has_route is False
 
     def test_set_route_ignores_non_dict_entries(self):
         tracker = NextHopTracker()
         tracker.set_route([{"StarSystem": "Sol"}, "garbage", None, {"StarSystem": "Next"}])
-        assert tracker.next_hop("Sol").system == "Next"
+        assert tracker.next_hop("Sol")[0].system == "Next"
 
 
 class TestScoopability:
