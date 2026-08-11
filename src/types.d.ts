@@ -133,6 +133,9 @@ type EdsmWorthScanningEvent = EdsmWorthScanningVerdict & { notify?: boolean };
 // safety) and stays present even when the EDSM lookup is unavailable; it is
 // null only when the star class is unknown. verdict/totalValue/priorityBodies
 // come from the EDSM per-system read and are neutral (null/[]) when unavailable.
+// reason discriminates why there is no next hop ("hop" when one is present);
+// optional so a payload from a not-yet-updated backend still renders — the UI
+// falls back to generic no-route text when it is absent.
 interface EdsmNextHopPreview {
   system: string | null;
   scoopable: boolean | null;
@@ -141,6 +144,7 @@ interface EdsmNextHopPreview {
   source: "edsm";
   totalValue: number | null;
   priorityBodies: EdsmPriorityBody[];
+  reason?: "hop" | "no_route" | "final_hop" | "off_route" | "disabled";
 }
 
 // Emitted as "edsm_next_hop" decky event on route change / after each jump.

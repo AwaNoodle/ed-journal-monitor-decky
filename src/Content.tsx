@@ -8,7 +8,7 @@ import {
   TextField,
 } from "@decky/ui";
 import { addEventListener, removeEventListener } from "@decky/api";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import {
   createDiagnosticsBundle,
   findJournalPath,
@@ -34,6 +34,70 @@ const EDSM_API_KEY_URL = "https://www.edsm.net/en/settings/api";
 // status load), so read through a helper that reflects the possibly-undefined.
 const readTarget = (map: TargetStatsMap, key: string): TargetStats | undefined => map[key];
 
+// --- Collapsible section primitive ---------------------------------------
+// Built from Field (@decky/ui ships no collapsible). Collapsed children are
+// not rendered (never CSS-hidden), so they contribute no gamepad focus stops.
+// The header Field is the single focusable toggle; the chevron icon shows
+// expanded/collapsed state.
+const CollapsibleSection = ({
+  label, summary, expanded, onToggle, indentLevel, children,
+}: {
+  label: string;
+  summary?: ReactNode;
+  expanded: boolean;
+  onToggle: () => void;
+  indentLevel?: number;
+  children: ReactNode;
+}): JSX.Element => (
+  <>
+    <PanelSectionRow>
+      <Field
+        focusable
+        onActivate={onToggle}
+        label={label}
+        icon={<span aria-hidden>{expanded ? "▾" : "▸"}</span>}
+        indentLevel={indentLevel}
+      >
+        {summary}
+      </Field>
+    </PanelSectionRow>
+    {expanded && children}
+  </>
+);
+
+// --- Health strip -----------------------------------------------------------
+// A single always-visible, non-focusable line replacing the old separate
+// ED Status / Journal Status fields. Worst-state-wins.
+type HealthState = "no_path" | "running_not_watching" | "paused" | "waiting" | "watching";
+
+const healthState = (
+  journalPath: string | null,
+  edRunning: boolean,
+  watcherRunning: boolean,
+  enabled: boolean,
+): HealthState => {
+  if (!journalPath) return "no_path";
+  if (edRunning && !watcherRunning) return "running_not_watching";
+  if (!enabled) return "paused";
+  if (!edRunning) return "waiting";
+  return "watching";
+};
+
+const HEALTH_STRIP_TEXT: Record<HealthState, string> = {
+  no_path: "🔍 No journal path configured — see Setup",
+  running_not_watching: "⚠️ Elite Dangerous is running, but the plugin isn't watching",
+  paused: "⏸️ Watching paused",
+  waiting: "🟡 Ready — waiting for Elite Dangerous",
+  watching: "🟢 Watching",
+};
+
+const NEXT_HOP_REASON_TEXT: Record<string, string> = {
+  no_route: "No route plotted",
+  final_hop: "Destination reached",
+  off_route: "Off the plotted route",
+  disabled: "Enable EDSM lookups to preview the next hop",
+};
+
 const Content = (): JSX.Element => {
   const [enabled, setEnabledState] = useState(true);
   const [watcherRunning, setWatcherRunning] = useState(false);
@@ -51,7 +115,6 @@ const Content = (): JSX.Element => {
   const [pathError, setPathError] = useState<string | null>(null);
   const [detailedLogging, setDetailedLoggingState] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticsResult | null>(null);
-  const [recentErrors, setRecentErrors] = useState<ActivityEntry[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityEntry[]>([]);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [edsmLookupsEnabled, setEdsmLookupsEnabledState] = useState<boolean>(false);
@@ -62,9 +125,23 @@ const Content = (): JSX.Element => {
   const [nearestScoopable, setNearestScoopable] = useState<NearestScoopableStarResult | null>(null);
   const [nearestScoopableLoading, setNearestScoopableLoading] = useState<boolean>(false);
 
+  // Collapse state resets on every panel open — plain useState is enough
+  // since Content unmounts when the panel closes.
+  const [dataFlowExpanded, setDataFlowExpanded] = useState(false);
+  const [setupExpanded, setSetupExpanded] = useState(false);
+  const [troubleshootingExpanded, setTroubleshootingExpanded] = useState(false);
+  const [journalGroupExpanded, setJournalGroupExpanded] = useState(false);
+  const [eddnGroupExpanded, setEddnGroupExpanded] = useState(false);
+  const [edsmAccountGroupExpanded, setEdsmAccountGroupExpanded] = useState(false);
+  const [edsmLookupsGroupExpanded, setEdsmLookupsGroupExpanded] = useState(false);
+
   // Ref to track current uploaderId so the commander_detected listener
   // doesn't use a stale closure value
   const uploaderIdRef = useRef<string>("");
+  // Data flow's initial expanded state is derived once from the failure
+  // count at load time, not re-evaluated live (a failure arriving mid-session
+  // should not yank the section open under the player's hands).
+  const dataFlowAutoExpandChecked = useRef<boolean>(false);
 
   // Load initial status
   useEffect((): void => {
@@ -77,6 +154,11 @@ const Content = (): JSX.Element => {
         setJournalPath(status.journal_path);
         setJournalPathSource(status.journal_path_source);
         setTargets(status.targets);
+        if (!dataFlowAutoExpandChecked.current) {
+          dataFlowAutoExpandChecked.current = true;
+          const failCount = Object.values(status.targets).reduce((sum, t): number => sum + t.fail_count, 0);
+          if (failCount > 0) setDataFlowExpanded(true);
+        }
         const uid = status.uploader_id;
         setUploaderIdState(uid);
         setUploaderIdInput(uid);
@@ -131,8 +213,7 @@ const Content = (): JSX.Element => {
     });
 
     const nextHopListener = addEventListener("edsm_next_hop", (data: EdsmNextHopEvent): void => {
-      // Neutral payload (no route / no hop / disabled) has system === null.
-      setEdsmNextHop(data.system === null ? null : data);
+      setEdsmNextHop(data);
     });
 
     const sessionListener = addEventListener("session_update", (data: SessionUpdateEvent): void => {
@@ -155,18 +236,11 @@ const Content = (): JSX.Element => {
     });
 
     const activityListener = addEventListener("activity_update", (entry: ActivityEntry): void => {
-      // Add to recent activity (keep last 10)
+      // Add to the merged feed (keep last 10)
       setRecentActivity((prev): ActivityEntry[] => {
         const updated = [entry, ...prev];
         return updated.slice(0, 10);
       });
-      // Add to errors if failure (keep last 5)
-      if (entry.outcome === "failure") {
-        setRecentErrors((prev): ActivityEntry[] => {
-          const updated = [entry, ...prev];
-          return updated.slice(0, 5);
-        });
-      }
     });
 
     // Auto-detect commander name from LoadGame for uploader ID
@@ -185,10 +259,7 @@ const Content = (): JSX.Element => {
     // Fetch initial activity
     void (async (): Promise<void> => {
       try {
-        const activity = await getRecentActivity(10);
-        setRecentActivity(activity);
-        const errors = await getRecentActivity(5, "failure");
-        setRecentErrors(errors);
+        setRecentActivity(await getRecentActivity(10));
       } catch (e) {
         console.error("Failed to fetch activity", e);
       }
@@ -282,9 +353,15 @@ const Content = (): JSX.Element => {
     setEdsmNotifyAllVerdictsState(state);
   };
 
+  // Self-enabling: when lookups are off, one activation persists the setting
+  // and then runs the search — no dead-end advisory text.
   const handleFindNearestScoopable = async (): Promise<void> => {
     setNearestScoopableLoading(true);
     try {
+      if (!edsmLookupsEnabled) {
+        await setEdsmLookupsEnabled(true);
+        setEdsmLookupsEnabledState(true);
+      }
       setNearestScoopable(await getNearestScoopableStar());
     } finally {
       setNearestScoopableLoading(false);
@@ -363,35 +440,36 @@ const Content = (): JSX.Element => {
     );
   };
 
-  // Next-in-route preview: the next system the plotted route jumps to. Mirrors
-  // the Current location block (system name, worth-scanning chip, est. scan
-  // value) and adds a scoopability chip (fuel safety). Preceded by a divider;
-  // renders nothing in the neutral state (no route / disabled).
-  const renderNextHop = (): JSX.Element | null => {
-    if (!edsmNextHop || edsmNextHop.system === null) return null;
+  // Next-in-route preview: rendered in every state (permanent block, fixed
+  // minimum footprint) rather than hidden when there is no next hop. Branches
+  // on `reason`; falls back to generic no-route text when it is absent
+  // (payload from a not-yet-updated backend).
+  const renderNextHop = (): JSX.Element => {
+    const reasonText = edsmNextHop?.reason ? NEXT_HOP_REASON_TEXT[edsmNextHop.reason] : undefined;
     return (
-      <>
-        <PanelSectionRow>
-          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
-            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Next hop</span>
-            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
-              {edsmNextHop.system}
+      <PanelSectionRow>
+        <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px", minHeight: "60px" }}>
+          <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Next hop · EDSM</span>
+          {edsmNextHop && edsmNextHop.system !== null ? (
+            <>
+              <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+                {edsmNextHop.system}
+              </span>
+              {edsmNextHop.verdict !== null && renderVerdictChip(edsmNextHop.verdict)}
+              {renderSystemValue(edsmNextHop)}
+              {renderScoopChip(edsmNextHop.scoopable)}
+            </>
+          ) : (
+            <span style={{ fontSize: "13px", opacity: 0.7 }}>
+              {reasonText ?? NEXT_HOP_REASON_TEXT.no_route}
             </span>
-            {edsmNextHop.verdict !== null && renderVerdictChip(edsmNextHop.verdict)}
-            {renderSystemValue(edsmNextHop)}
-            {renderScoopChip(edsmNextHop.scoopable)}
-          </div>
-        </PanelSectionRow>
-      </>
+          )}
+        </div>
+      </PanelSectionRow>
     );
   };
 
-  // Result of the on-demand nearest-scoopable-star lookup. Renders nothing
-  // for the "disabled" status — the toggle-off path already clears
-  // nearestScoopable, and the button/hint above cover the disabled state.
+  // Result of the on-demand nearest-scoopable-star lookup.
   const renderNearestScoopableResult = (): JSX.Element | null => {
     if (!nearestScoopable) return null;
     if (nearestScoopable.status === "ok") {
@@ -428,9 +506,9 @@ const Content = (): JSX.Element => {
     return null;
   };
 
-  // On-demand "help me now" action: finds the nearest fuel-scoopable star
-  // from the current system via an EDSM sphere-systems query. Gated by the
-  // same EDSM auto-lookup toggle as the passive verdict/next-hop features.
+  // On-demand "help me now" action: finds the nearest fuel-scoopable star from
+  // the current system via an EDSM sphere-systems query. Self-enabling: if
+  // auto-lookups are off, one activation turns them on and runs the search.
   const renderNearestScoopable = (): JSX.Element => (
     <>
       <PanelSectionRow>
@@ -440,28 +518,18 @@ const Content = (): JSX.Element => {
         <ButtonItem
           layout="below"
           onClick={(): void => { void handleFindNearestScoopable(); }}
-          disabled={!edsmLookupsEnabled || nearestScoopableLoading}
+          disabled={nearestScoopableLoading}
         >
-          {nearestScoopableLoading ? "Searching…" : "Find Nearest Scoopable Star"}
+          {nearestScoopableLoading
+            ? "Searching…"
+            : edsmLookupsEnabled
+              ? "Find Nearest Scoopable Star"
+              : "Enable EDSM lookups to search"}
         </ButtonItem>
       </PanelSectionRow>
-      {!edsmLookupsEnabled && (
-        <PanelSectionRow>
-          <Field>Enable EDSM lookup to use this action</Field>
-        </PanelSectionRow>
-      )}
-      {edsmLookupsEnabled && renderNearestScoopableResult()}
+      {renderNearestScoopableResult()}
     </>
   );
-
-  const handleCreateDiagnostics = async (): Promise<void> => {
-    const result = await createDiagnosticsBundle();
-    setDiagnosticResult(result);
-  };
-
-  const getEdStatusText = (): string => {
-    return edRunning ? "🟢 Running" : "⚪ Not Running";
-  };
 
   const getEdsmStatusText = (): string => {
     if (!edsmApiKeySet) return "⚪ Inactive — no API key set";
@@ -470,13 +538,6 @@ const Content = (): JSX.Element => {
     return edRunning
       ? "🟡 Enabled — starting…"
       : "🟡 Enabled — starts when Elite Dangerous launches";
-  };
-
-  const getJournalStatusText = (): string => {
-    if (!journalPath) return "🔍 Not Found";
-    if (watcherRunning) return "🟢 Watching";
-    // Journal path found but not watching
-    return edRunning ? "⚠️ Found, Not Watching" : "📂 Found";
   };
 
   const getActivityKey = (entry: ActivityEntry): string => {
@@ -526,7 +587,31 @@ const Content = (): JSX.Element => {
     );
   };
 
-  const renderSession = (): JSX.Element => {
+  // Navigation: the always-visible, non-collapsible flight view — current
+  // location, worth-scanning verdict, system value, the permanent next-hop
+  // block, and the on-demand nearest-scoopable action.
+  const renderNavigation = (): JSX.Element => (
+    <>
+      <PanelSectionRow>
+        <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
+          <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Current location</span>
+          <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
+            {sessionStats?.star_system || "Unknown"}
+          </span>
+          {edsmWorthScanning && renderVerdictChip(edsmWorthScanning.verdict)}
+          {renderSystemValue(edsmWorthScanning)}
+        </div>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+      </PanelSectionRow>
+      {renderNextHop()}
+      {renderNearestScoopable()}
+    </>
+  );
+
+  // Session: the counters only — current location moved to Navigation above it.
+  const renderSessionCounters = (): JSX.Element => {
     if (!hasSessionData(sessionStats) || !sessionStats) {
       return (
         <PanelSectionRow>
@@ -535,262 +620,346 @@ const Content = (): JSX.Element => {
       );
     }
     return (
-      <>
-        <PanelSectionRow>
-          <div style={{ display: "flex", flexWrap: "wrap", width: "100%" }}>
-            {renderCounter("Jumps", String(sessionStats.jumps))}
-            {renderCounter("Distance (ly)", sessionStats.distance_ly.toFixed(1))}
-            {renderCounter("Bodies Scanned", String(sessionStats.bodies_scanned))}
-            {renderCounter("First Discoveries", String(sessionStats.first_discoveries))}
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "4px" }}>
-            <span style={{ fontSize: "11px", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Current location</span>
-            <span style={{ fontSize: "16px", fontWeight: "bold", overflowWrap: "anywhere" }}>
-              {sessionStats.star_system || "Unknown"}
-            </span>
-            {edsmWorthScanning && renderVerdictChip(edsmWorthScanning.verdict)}
-            {renderSystemValue(edsmWorthScanning)}
-          </div>
-        </PanelSectionRow>
-        {renderNextHop()}
-        {renderNearestScoopable()}
-      </>
+      <PanelSectionRow>
+        <div style={{ display: "flex", flexWrap: "wrap", width: "100%" }}>
+          {renderCounter("Jumps", String(sessionStats.jumps))}
+          {renderCounter("Distance (ly)", sessionStats.distance_ly.toFixed(1))}
+          {renderCounter("Bodies Scanned", String(sessionStats.bodies_scanned))}
+          {renderCounter("First Discoveries", String(sessionStats.first_discoveries))}
+        </div>
+      </PanelSectionRow>
     );
   };
 
-  return (
-    <div>
-      <PanelSection title="Session">
-        {renderSession()}
-      </PanelSection>
-
-      <PanelSection title="Status">
+  // Data flow: per-target counters plus the merged success/failure feed
+  // (Recent Activity + Recent Errors combined — both are the same log,
+  // filtered differently).
+  const renderDataFlow = (): JSX.Element => (
+    <>
+      {renderUploadTargets()}
+      <PanelSectionRow>
+        <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
+      </PanelSectionRow>
+      {recentActivity.length === 0 ? (
         <PanelSectionRow>
-          <ToggleField
-            label="Watch journal"
-            checked={enabled}
-            onChange={(state: boolean): void => { void handleToggle(state); }}
-          />
+          <Field>No activity yet</Field>
         </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="ED Status">
-            {getEdStatusText()}
-          </Field>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Journal Status">
-            {getJournalStatusText()}
-          </Field>
-        </PanelSectionRow>
-        {renderUploadTargets()}
-      </PanelSection>
-
-      <PanelSection title="Recent Activity">
-        {recentActivity.length === 0 ? (
-          <PanelSectionRow>
-            <Field>No activity yet</Field>
-          </PanelSectionRow>
-        ) : (
-          recentActivity.map((entry: ActivityEntry): JSX.Element => (
-            <PanelSectionRow key={getActivityKey(entry)}>
+      ) : (
+        recentActivity.map((entry: ActivityEntry): JSX.Element => (
+          <PanelSectionRow key={getActivityKey(entry)}>
+            {entry.outcome === "success" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                 <span>
-                  {entry.outcome === "success" ? "✅" : "❌"} {entry.event_type}
+                  ✅ {entry.event_type}
                   <span style={{ fontSize: "11px", opacity: 0.6 }}> · {formatTargetLabel(entry.target)}</span>
                 </span>
                 <span style={{ fontSize: "12px", opacity: 0.7 }}>{new Date(entry.timestamp).toLocaleTimeString()}</span>
               </div>
-            </PanelSectionRow>
-          ))
-        )}
-      </PanelSection>
-
-      <PanelSection title="Configuration">
-        {journalPath && (
-          <PanelSectionRow>
-            <Field label="Journal Path">
-              {journalPath.length > 40 ? journalPath.slice(0, 18) + '…' + journalPath.slice(-18) : journalPath}
-            </Field>
-          </PanelSectionRow>
-        )}
-        {journalPathSource && (
-          <PanelSectionRow>
-            <Field label="Path Source">
-              {journalPathSource === "auto" ? "Auto-detected" : "Manual"}
-            </Field>
-          </PanelSectionRow>
-        )}
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={(): void => { void handleRescan(); }}>
-            Re-scan for Journal Path
-          </ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <TextField
-            label="Manual Journal Path"
-            value={manualPathInput}
-            onChange={(e): void => { setManualPathInput(e.target.value); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={(): void => { void handleSetManualPath(); }} disabled={!manualPathInput}>
-            Set Manual Path
-          </ButtonItem>
-        </PanelSectionRow>
-        {pathError && (
-          <PanelSectionRow>
-            <Field>
-              ⚠️ {pathError}
-            </Field>
-          </PanelSectionRow>
-        )}
-        <PanelSectionRow>
-          <TextField
-            label="EDDN Uploader ID"
-            value={uploaderIdInput}
-            onChange={(e): void => { setUploaderIdInput(e.target.value); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={(): void => { void handleSetUploaderId(); }} disabled={!uploaderIdInput}>
-            Save Uploader ID
-          </ButtonItem>
-        </PanelSectionRow>
-        {!uploaderId && (
-          <PanelSectionRow>
-            <Field>
-              ⚠️ Uploader ID will be auto-set from your CMDR name when ED loads a game session
-            </Field>
-          </PanelSectionRow>
-        )}
-      </PanelSection>
-
-      <PanelSection title="EDSM">
-        <PanelSectionRow>
-          <div style={{ width: "100%", fontSize: "12px", opacity: 0.8, textAlign: "justify" }}>
-            EDSM uploads your flight logs under your <strong>named EDSM identity</strong>,
-            unlike anonymous EDDN. It is off until you enter an API key.
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <Field label="Status">
-            {getEdsmStatusText()}
-          </Field>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <TextField
-            label="EDSM Commander Name"
-            value={edsmCommanderInput}
-            onChange={(e): void => { setEdsmCommanderInput(e.target.value); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <TextField
-            label={edsmApiKeySet ? "EDSM API Key (saved — leave blank to keep)" : "EDSM API Key"}
-            value={edsmApiKeyInput}
-            onChange={(e): void => {
-              setEdsmApiKeyInput(e.target.value);
-              setEdsmSaved(false);
-            }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={(): void => { void handleSetEdsmCredentials(); }}
-            disabled={!edsmCommanderInput || (!edsmApiKeyInput && !edsmApiKeySet)}
-          >
-            Save EDSM Credentials
-          </ButtonItem>
-        </PanelSectionRow>
-        {edsmSaved && (
-          <PanelSectionRow>
-            <div style={{ width: "100%", fontSize: "12px", textAlign: "left" }}>
-              ✅ Saved
-            </div>
-          </PanelSectionRow>
-        )}
-        <PanelSectionRow>
-          <div style={{ width: "100%", fontSize: "12px", opacity: 0.7, textAlign: "left", overflowWrap: "anywhere" }}>
-            Generate your API key at {EDSM_API_KEY_URL}
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ width: "100%", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "4px 0" }} />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Enable EDSM lookup"
-            checked={edsmLookupsEnabled}
-            onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="'Worth-scanning' Notifications"
-            description="Toast over the running game on arrival in a worth-scanning system"
-            checked={edsmNotificationsEnabled}
-            disabled={!edsmLookupsEnabled}
-            onChange={(state: boolean): void => { void handleEdsmNotificationsToggle(state); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Notify on partially-explored systems too"
-            checked={edsmNotifyAllVerdicts}
-            disabled={!edsmLookupsEnabled}
-            onChange={(state: boolean): void => { void handleEdsmNotifyAllVerdictsToggle(state); }}
-          />
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Recent Errors">
-        {recentErrors.length === 0 ? (
-          <PanelSectionRow>
-            <Field>No errors</Field>
-          </PanelSectionRow>
-        ) : (
-          recentErrors.map((entry: ActivityEntry): JSX.Element => (
-            <PanelSectionRow key={getActivityKey(entry)}>
-              <Field label={`${entry.event_type} · ${formatTargetLabel(entry.target)}`}>
+            ) : (
+              <Field label={`❌ ${entry.event_type} · ${formatTargetLabel(entry.target)}`}>
                 <div style={{ fontSize: "12px" }}>
                   <div>{new Date(entry.timestamp).toLocaleTimeString()} — {entry.error_type}</div>
                   <div>{entry.error_message}{entry.http_status != null ? ` (${String(entry.http_status)})` : ""}</div>
                 </div>
               </Field>
-            </PanelSectionRow>
-          ))
-        )}
+            )}
+          </PanelSectionRow>
+        ))
+      )}
+    </>
+  );
+
+  const renderJournalPathGroup = (): JSX.Element => (
+    <div style={{ paddingLeft: "12px" }}>
+      <PanelSectionRow>
+        <ToggleField
+          label="Watch journal"
+          checked={enabled}
+          onChange={(state: boolean): void => { void handleToggle(state); }}
+        />
+      </PanelSectionRow>
+      {journalPath && (
+        <PanelSectionRow>
+          <Field label="Journal Path">
+            {journalPath.length > 40 ? journalPath.slice(0, 18) + '…' + journalPath.slice(-18) : journalPath}
+          </Field>
+        </PanelSectionRow>
+      )}
+      {journalPathSource && (
+        <PanelSectionRow>
+          <Field label="Path Source">
+            {journalPathSource === "auto" ? "Auto-detected" : "Manual"}
+          </Field>
+        </PanelSectionRow>
+      )}
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={(): void => { void handleRescan(); }}>
+          Re-scan for Journal Path
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <TextField
+          label="Manual Journal Path"
+          value={manualPathInput}
+          onChange={(e): void => { setManualPathInput(e.target.value); }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={(): void => { void handleSetManualPath(); }} disabled={!manualPathInput}>
+          Set Manual Path
+        </ButtonItem>
+      </PanelSectionRow>
+      {pathError && (
+        <PanelSectionRow>
+          <Field>
+            ⚠️ {pathError}
+          </Field>
+        </PanelSectionRow>
+      )}
+    </div>
+  );
+
+  const renderEddnGroup = (): JSX.Element => (
+    <div style={{ paddingLeft: "12px" }}>
+      <PanelSectionRow>
+        <TextField
+          label="EDDN Uploader ID"
+          value={uploaderIdInput}
+          onChange={(e): void => { setUploaderIdInput(e.target.value); }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={(): void => { void handleSetUploaderId(); }} disabled={!uploaderIdInput}>
+          Save Uploader ID
+        </ButtonItem>
+      </PanelSectionRow>
+      {!uploaderId && (
+        <PanelSectionRow>
+          <Field>
+            ⚠️ Uploader ID will be auto-set from your CMDR name when ED loads a game session
+          </Field>
+        </PanelSectionRow>
+      )}
+    </div>
+  );
+
+  const renderEdsmAccountGroup = (): JSX.Element => (
+    <div style={{ paddingLeft: "12px" }}>
+      <PanelSectionRow>
+        <div style={{ width: "100%", fontSize: "12px", opacity: 0.8, textAlign: "justify" }}>
+          EDSM uploads your flight logs under your <strong>named EDSM identity</strong>,
+          unlike anonymous EDDN. It is off until you enter an API key.
+        </div>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <Field label="Status">
+          {getEdsmStatusText()}
+        </Field>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <TextField
+          label="EDSM Commander Name"
+          value={edsmCommanderInput}
+          onChange={(e): void => { setEdsmCommanderInput(e.target.value); }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <TextField
+          label={edsmApiKeySet ? "EDSM API Key (saved — leave blank to keep)" : "EDSM API Key"}
+          value={edsmApiKeyInput}
+          onChange={(e): void => {
+            setEdsmApiKeyInput(e.target.value);
+            setEdsmSaved(false);
+          }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={(): void => { void handleSetEdsmCredentials(); }}
+          disabled={!edsmCommanderInput || (!edsmApiKeyInput && !edsmApiKeySet)}
+        >
+          Save EDSM Credentials
+        </ButtonItem>
+      </PanelSectionRow>
+      {edsmSaved && (
+        <PanelSectionRow>
+          <div style={{ width: "100%", fontSize: "12px", textAlign: "left" }}>
+            ✅ Saved
+          </div>
+        </PanelSectionRow>
+      )}
+      <PanelSectionRow>
+        <div style={{ width: "100%", fontSize: "12px", opacity: 0.7, textAlign: "left", overflowWrap: "anywhere" }}>
+          Generate your API key at {EDSM_API_KEY_URL}
+        </div>
+      </PanelSectionRow>
+    </div>
+  );
+
+  const renderEdsmLookupsGroup = (): JSX.Element => (
+    <div style={{ paddingLeft: "12px" }}>
+      <PanelSectionRow>
+        <div style={{ width: "100%", fontSize: "12px", opacity: 0.8, textAlign: "justify" }}>
+          Keyless, anonymous reads from EDSM's public data — independent of the EDSM account above.
+        </div>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="Enable EDSM lookup"
+          checked={edsmLookupsEnabled}
+          onChange={(state: boolean): void => { void handleEdsmLookupsToggle(state); }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="'Worth-scanning' Notifications"
+          description="Toast over the running game on arrival in a worth-scanning system"
+          checked={edsmNotificationsEnabled}
+          disabled={!edsmLookupsEnabled}
+          onChange={(state: boolean): void => { void handleEdsmNotificationsToggle(state); }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="Notify on partially-explored systems too"
+          checked={edsmNotifyAllVerdicts}
+          disabled={!edsmLookupsEnabled}
+          onChange={(state: boolean): void => { void handleEdsmNotifyAllVerdictsToggle(state); }}
+        />
+      </PanelSectionRow>
+    </div>
+  );
+
+  const renderSetup = (): JSX.Element => (
+    <>
+      <CollapsibleSection
+        label="Journal path"
+        summary={journalPath ? "Path set" : "No path set"}
+        expanded={journalGroupExpanded}
+        onToggle={(): void => { setJournalGroupExpanded((e): boolean => !e); } }
+        indentLevel={1}
+      >
+        {renderJournalPathGroup()}
+      </CollapsibleSection>
+      <CollapsibleSection
+        label="EDDN"
+        summary={uploaderId ? "ID set" : "No ID"}
+        expanded={eddnGroupExpanded}
+        onToggle={(): void => { setEddnGroupExpanded((e): boolean => !e); } }
+        indentLevel={1}
+      >
+        {renderEddnGroup()}
+      </CollapsibleSection>
+      <CollapsibleSection
+        label="EDSM account"
+        summary={edsmApiKeySet ? "API key set" : "No API key"}
+        expanded={edsmAccountGroupExpanded}
+        onToggle={(): void => { setEdsmAccountGroupExpanded((e): boolean => !e); } }
+        indentLevel={1}
+      >
+        {renderEdsmAccountGroup()}
+      </CollapsibleSection>
+      <CollapsibleSection
+        label="EDSM lookups"
+        summary={edsmLookupsEnabled ? "Lookups on" : "Lookups off"}
+        expanded={edsmLookupsGroupExpanded}
+        onToggle={(): void => { setEdsmLookupsGroupExpanded((e): boolean => !e); } }
+        indentLevel={1}
+      >
+        {renderEdsmLookupsGroup()}
+      </CollapsibleSection>
+    </>
+  );
+
+  const renderTroubleshooting = (): JSX.Element => (
+    <>
+      <PanelSectionRow>
+        <ToggleField
+          label="Detailed Logging"
+          description="Enables DEBUG-level logging for richer diagnostic output"
+          checked={detailedLogging}
+          onChange={(state: boolean): void => { void handleDetailedLoggingToggle(state); }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={(): void => { void handleCreateDiagnostics(); }}>
+          Create Diagnostic Bundle
+        </ButtonItem>
+      </PanelSectionRow>
+      {diagnosticResult && (
+        <PanelSectionRow>
+          <Field label="Bundle">
+            {diagnosticResult.success
+              ? `✅ ${diagnosticResult.path ?? ""} (${String(Math.round((diagnosticResult.size ?? 0) / 1024))} KB)`
+              : `❌ ${diagnosticResult.error ?? "Unknown error"}`}
+          </Field>
+        </PanelSectionRow>
+      )}
+    </>
+  );
+
+  const handleCreateDiagnostics = async (): Promise<void> => {
+    const result = await createDiagnosticsBundle();
+    setDiagnosticResult(result);
+  };
+
+  const aggregateCounts = Object.values(targets).reduce(
+    (acc, t): { success: number; fail: number } => ({
+      success: acc.success + t.success_count,
+      fail: acc.fail + t.fail_count,
+    }),
+    { success: 0, fail: 0 },
+  );
+
+  const currentHealthState = healthState(journalPath, edRunning, watcherRunning, enabled);
+
+  return (
+    <div>
+      <div style={{ padding: "8px 16px 4px", fontSize: "13px", opacity: 0.9 }}>
+        {HEALTH_STRIP_TEXT[currentHealthState]}
+        {currentHealthState === "watching" && uploaderId ? ` · CMDR ${uploaderId}` : ""}
+      </div>
+
+      <PanelSection title="Navigation">
+        {renderNavigation()}
       </PanelSection>
 
-      <PanelSection title="Diagnostics">
-        <PanelSectionRow>
-          <ToggleField
-            label="Detailed Logging"
-            description="Enables DEBUG-level logging for richer diagnostic output"
-            checked={detailedLogging}
-            onChange={(state: boolean): void => { void handleDetailedLoggingToggle(state); }}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={(): void => { void handleCreateDiagnostics(); }}>
-            Create Diagnostic Bundle
-          </ButtonItem>
-        </PanelSectionRow>
-        {diagnosticResult && (
-          <PanelSectionRow>
-            <Field label="Bundle">
-              {diagnosticResult.success
-                ? `✅ ${diagnosticResult.path ?? ""} (${String(Math.round((diagnosticResult.size ?? 0) / 1024))} KB)`
-                : `❌ ${diagnosticResult.error ?? "Unknown error"}`}
-            </Field>
-          </PanelSectionRow>
-        )}
+      <PanelSection title="Session">
+        {renderSessionCounters()}
+      </PanelSection>
+
+      <PanelSection>
+        <CollapsibleSection
+          label="Data flow"
+          summary={`✅ ${String(aggregateCounts.success)} ❌ ${String(aggregateCounts.fail)}`}
+          expanded={dataFlowExpanded}
+          onToggle={(): void => { setDataFlowExpanded((e): boolean => !e); } }
+        >
+          {renderDataFlow()}
+        </CollapsibleSection>
+      </PanelSection>
+
+      <PanelSection>
+        <CollapsibleSection
+          label="Setup"
+          summary={journalPath && uploaderId ? "Configured" : "Needs setup"}
+          expanded={setupExpanded}
+          onToggle={(): void => { setSetupExpanded((e): boolean => !e); } }
+        >
+          {renderSetup()}
+        </CollapsibleSection>
+      </PanelSection>
+
+      <PanelSection>
+        <CollapsibleSection
+          label="Troubleshooting"
+          summary={detailedLogging ? "Logging: DEBUG" : "Logging: INFO"}
+          expanded={troubleshootingExpanded}
+          onToggle={(): void => { setTroubleshootingExpanded((e): boolean => !e); } }
+        >
+          {renderTroubleshooting()}
+        </CollapsibleSection>
       </PanelSection>
     </div>
   );

@@ -72,7 +72,7 @@ npm run lint:py
 - `src/api.ts` — Defines all 12 callable frontend→backend methods
 - `src/types.d.ts` — TypeScript type definitions for callable results and emitted event payloads
 - `src/index.tsx` — Frontend: game lifecycle + plugin registration
-- `src/Content.tsx` — Frontend: UI panel (status, configuration, recent errors, recent activity, diagnostics)
+- `src/Content.tsx` — Frontend: UI panel, ordered by reading frequency (health strip, Navigation, Session always visible; Data flow, Setup, Troubleshooting collapsible) — see AGENTS.md's "Panel Layout" section
 - `plugin.json` — Decky plugin metadata (no root flag)
 
 ## Architecture

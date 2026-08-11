@@ -18,6 +18,13 @@ from dataclasses import dataclass
 # Fuel-scoopable primary-star classes (the "KGB FOAM" mnemonic).
 SCOOPABLE_CLASSES = frozenset("KGBFOAM")
 
+# Reason discriminators for the "no next hop" state, returned alongside a
+# ``None`` hop so a permanent UI block can state which condition applies.
+REASON_HOP = "hop"
+REASON_NO_ROUTE = "no_route"
+REASON_FINAL_HOP = "final_hop"
+REASON_OFF_ROUTE = "off_route"
+
 
 def is_scoopable(star_class: str | None) -> bool | None:
     """Whether a primary star of ``star_class`` is fuel-scoopable.
@@ -68,23 +75,31 @@ class NextHopTracker:
 
     def next_hop(
         self, current_system: str, current_address: int | None = None,
-    ) -> NextHop | None:
-        """Return the next hop after the current system, or None.
+    ) -> tuple[NextHop | None, str]:
+        """Return the next hop after the current system, alongside a reason.
 
-        None when there is no route, the current system is not on the route
-        (off-route), or the current system is the final hop.
+        The hop is ``None`` when there is no route, the current system is not
+        on the route (off-route), or the current system is the final hop; the
+        accompanying reason (``REASON_NO_ROUTE`` / ``REASON_OFF_ROUTE`` /
+        ``REASON_FINAL_HOP``) identifies which. When a hop exists, the reason
+        is ``REASON_HOP``.
         """
+        if not self._route:
+            return None, REASON_NO_ROUTE
         index = self._current_index(current_system, current_address)
-        if index is None or index + 1 >= len(self._route):
-            return None
+        if index is None:
+            return None, REASON_OFF_ROUTE
+        if index + 1 >= len(self._route):
+            return None, REASON_FINAL_HOP
         entry = self._route[index + 1]
         star_class = entry.get("StarClass")
-        return NextHop(
+        hop = NextHop(
             system=entry.get("StarSystem", "") or "",
             system_address=entry.get("SystemAddress"),
             star_class=star_class,
             scoopable=is_scoopable(star_class),
         )
+        return hop, REASON_HOP
 
     def _current_index(self, current_system: str, current_address: int | None) -> int | None:
         """Index of the current system in the route, by address then by name."""

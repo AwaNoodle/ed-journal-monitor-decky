@@ -24,7 +24,7 @@ import asyncio
 from typing import TYPE_CHECKING, Callable
 
 import decky
-from src.modules.edsm_next_hop import NextHop, NextHopTracker
+from src.modules.edsm_next_hop import REASON_HOP, NextHop, NextHopTracker
 from src.modules.edsm_read_client import STATUS_UNAVAILABLE, EdsmReadClient
 from src.modules.edsm_system_cache import SystemLookupCache
 from src.modules.edsm_system_value import derive_value_summary
@@ -41,9 +41,13 @@ _ARRIVAL_EVENTS = frozenset({"FSDJump", "Location"})
 
 NEXT_HOP_EVENT = "edsm_next_hop"
 
+# "disabled" is added here rather than in edsm_next_hop.py because it is a
+# settings-level cause, not one the route tracker can derive on its own.
+REASON_DISABLED = "disabled"
 
-def neutral_next_hop() -> dict:
-    """The neutral 'no preview' payload (no route / no hop / disabled / failed)."""
+
+def neutral_next_hop(reason: str = REASON_DISABLED) -> dict:
+    """The neutral 'no preview' payload, carrying why there is no next hop."""
     return {
         "system": None,
         "scoopable": None,
@@ -52,6 +56,7 @@ def neutral_next_hop() -> dict:
         "source": "edsm",
         "totalValue": None,
         "priorityBodies": [],
+        "reason": reason,
     }
 
 
@@ -143,12 +148,12 @@ class EdsmNextHopConsumer:
             return
         if not self._current_system:
             return  # don't know where we are yet; wait for an arrival
-        hop = self._tracker.next_hop(self._current_system, self._current_address)
+        hop, reason = self._tracker.next_hop(self._current_system, self._current_address)
         if hop is None:
             if self._last_hop == "":
                 return  # already neutral
             self._last_hop = ""
-            self._emit(neutral_next_hop())
+            self._emit(neutral_next_hop(reason))
             return
         if hop.system == self._last_hop:
             return  # unchanged; avoid a redundant lookup
@@ -264,6 +269,7 @@ class EdsmNextHopConsumer:
             "source": "edsm",
             "totalValue": None,
             "priorityBodies": [],
+            "reason": REASON_HOP,
         }
         if value_summary is not None:
             payload["totalValue"] = value_summary.total_value

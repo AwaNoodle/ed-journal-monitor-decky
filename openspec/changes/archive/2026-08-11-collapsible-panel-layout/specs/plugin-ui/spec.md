@@ -1,7 +1,4 @@
-## Purpose
-
-Present the plugin's status, per-target upload statistics, configuration, and activity to the user in the Decky panel.
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Collapsible panel sections
 
@@ -117,6 +114,8 @@ EDSM settings SHALL be presented as two separate groups within Setup: an account
 - **WHEN** no EDSM API key is configured
 - **THEN** the EDSM lookup toggle SHALL remain available and operable
 
+## MODIFIED Requirements
+
 ### Requirement: Display upload statistics
 The frontend SHALL display upload counts per target received from backend events, rendering the targets by mapping over the per-target statistics map rather than from hardcoded target keys, so that a new target appears without a UI change. The per-target counts SHALL be presented within the Data flow section, whose collapsed header carries the aggregate counts. EDDN SHALL retain its per-event activity display. EDSM's success/fail counts SHALL appear in the per-target rows; EDSM errors are surfaced per-event in the merged activity feed (see the `error-display` capability), not as a separate block.
 
@@ -144,96 +143,6 @@ The frontend SHALL provide a toggle to enable or disable the journal monitor, lo
 - **THEN** the frontend SHALL check if ED is currently running
 - **THEN** if ED is running, start the watcher immediately
 
-### Requirement: Configure journal path manually
-The frontend SHALL provide a text input for the user to set the journal directory path manually.
-
-#### Scenario: User enters manual path
-- **WHEN** the user enters a path and submits it
-- **THEN** the frontend SHALL call the backend `set_journal_path` method
-- **THEN** if valid, display a success message
-- **THEN** if invalid, display an error message
-
-### Requirement: Configure uploader ID
-The frontend SHALL provide a text input for the user to set their EDDN uploader ID.
-
-#### Scenario: User sets uploader ID
-- **WHEN** the user enters an uploader ID and submits it
-- **THEN** the frontend SHALL call the backend to save the uploader ID to settings
-
-#### Scenario: No uploader ID set
-- **WHEN** no uploader ID is configured
-- **THEN** the panel SHALL show a notice that the uploader ID should be set before uploading
-
-### Requirement: Display journal path
-The frontend SHALL display the currently configured journal path.
-
-#### Scenario: Auto-detected path
-- **WHEN** the journal path was found via VDF scan
-- **THEN** the panel SHALL display the path with an "Auto-detected" label
-
-#### Scenario: Manually set path
-- **WHEN** the journal path was set by the user
-- **THEN** the panel SHALL display the path with a "Manual" label
-
-### Requirement: Display diagnostics section
-The frontend SHALL present a Troubleshooting section, collapsed by default, containing a detailed logging toggle and a bundle creation button.
-
-#### Scenario: Diagnostics section visible
-- **WHEN** the Troubleshooting section is expanded
-- **THEN** a "Detailed Logging" toggle and a "Create Diagnostic Bundle" button SHALL be visible
-
-#### Scenario: Detailed logging toggle
-- **WHEN** the user toggles "Detailed Logging" on
-- **THEN** the frontend SHALL call `set_detailed_logging(true)`
-- **WHEN** the user toggles "Detailed Logging" off
-- **THEN** the frontend SHALL call `set_detailed_logging(false)`
-
-#### Scenario: Create diagnostic bundle
-- **WHEN** the user clicks "Create Diagnostic Bundle"
-- **THEN** the frontend SHALL call `create_diagnostics()`
-- **THEN** the panel SHALL display the zip file path
-
-#### Scenario: Bundle creation fails
-- **WHEN** `create_diagnostics()` returns `{ "success": false }`
-- **THEN** the panel SHALL display an error message
-
-### Requirement: Configure EDSM credentials
-The frontend SHALL provide inputs for the user to set their EDSM commander name and API key, with a link to where the API key is generated, and SHALL state that EDSM uploads identifiable flight logs under the user's named EDSM account.
-
-#### Scenario: User sets EDSM credentials
-
-- **WHEN** the user enters an EDSM commander name and API key and submits them
-- **THEN** the frontend SHALL call the backend to save the EDSM credentials to settings
-
-#### Scenario: Identifiability notice shown
-
-- **WHEN** the EDSM credential inputs are displayed
-- **THEN** the panel SHALL show a notice that flight logs upload under the user's named EDSM identity, distinct from anonymous EDDN
-
-#### Scenario: EDSM inactive without API key
-
-- **WHEN** no EDSM API key is configured
-- **THEN** the panel SHALL indicate EDSM is inactive and that an API key is required to enable it
-
-### Requirement: Configure EDSM auto-lookups
-
-The EDSM configuration section SHALL provide a toggle for the user to enable or disable EDSM auto-lookups, separate from the EDSM credentials.
-
-#### Scenario: User enables auto-lookups
-
-- **WHEN** the user turns the EDSM auto-lookup toggle on
-- **THEN** the frontend SHALL call the backend to persist the enabled setting
-
-#### Scenario: User disables auto-lookups
-
-- **WHEN** the user turns the EDSM auto-lookup toggle off
-- **THEN** the frontend SHALL call the backend to persist the disabled setting, after which no EDSM read requests are made
-
-#### Scenario: Toggle state reflects saved setting
-
-- **WHEN** the EDSM configuration section is displayed
-- **THEN** the auto-lookup toggle SHALL reflect the currently persisted setting
-
 ### Requirement: Nearest scoopable star action
 
 The panel SHALL provide an on-demand action to find the nearest scoopable star from the current system, presented within the Navigation section, and SHALL display the result — nearest system name, distance, and star class — with distinct in-flight, none-found, and unavailable states. The action MUST be visibly EDSM-sourced. When EDSM auto-lookups are disabled the action SHALL be self-enabling: it MUST state that activating it will enable lookups, and activating it MUST enable lookups and then perform the search in a single activation.
@@ -260,54 +169,38 @@ The panel SHALL provide an on-demand action to find the nearest scoopable star f
 - **WHEN** the user activates the action while lookups are disabled and no current system is known yet
 - **THEN** lookups SHALL be enabled and the panel SHALL show the unavailable state, rather than suppressing all feedback
 
-### Requirement: Configure worth-scanning notifications
+### Requirement: Display diagnostics section
+The frontend SHALL present a Troubleshooting section, collapsed by default, containing a detailed logging toggle and a bundle creation button.
 
-The EDSM configuration section SHALL provide a toggle for the user to enable or disable worth-scanning notifications, and a control to choose whether notifications fire on green verdicts only or on green and yellow verdicts. Both controls SHALL reflect the currently persisted settings and SHALL persist changes through the backend.
+#### Scenario: Diagnostics section visible
+- **WHEN** the Troubleshooting section is expanded
+- **THEN** a "Detailed Logging" toggle and a "Create Diagnostic Bundle" button SHALL be visible
 
-#### Scenario: User enables notifications
+#### Scenario: Detailed logging toggle
+- **WHEN** the user toggles "Detailed Logging" on
+- **THEN** the frontend SHALL call `set_detailed_logging(true)`
+- **WHEN** the user toggles "Detailed Logging" off
+- **THEN** the frontend SHALL call `set_detailed_logging(false)`
 
-- **WHEN** the user turns the notification toggle on
-- **THEN** the frontend SHALL call the backend to persist the enabled setting
+#### Scenario: Create diagnostic bundle
+- **WHEN** the user clicks "Create Diagnostic Bundle"
+- **THEN** the frontend SHALL call `create_diagnostics()`
+- **THEN** the panel SHALL display the zip file path
 
-#### Scenario: User disables notifications
+#### Scenario: Bundle creation fails
+- **WHEN** `create_diagnostics()` returns `{ "success": false }`
+- **THEN** the panel SHALL display an error message
 
-- **WHEN** the user turns the notification toggle off
-- **THEN** the frontend SHALL call the backend to persist the disabled setting, after which no notification is raised on arrival
+## REMOVED Requirements
 
-#### Scenario: User widens the verdict threshold
+### Requirement: Display plugin status panel
 
-- **WHEN** the user changes the verdict control from green-only to all verdicts
-- **THEN** the frontend SHALL call the backend to persist the new threshold
+**Reason**: The two independent status fields (ED Status, Journal Status) are replaced by the single worst-state-wins health strip, which conveys the same states in one always-visible line without consuming vertical space or focus stops.
 
-#### Scenario: Controls reflect saved settings
+**Migration**: Covered by the `Consolidated health strip` requirement above, whose scenarios map one-to-one onto the removed field combinations.
 
-- **WHEN** the EDSM configuration section is displayed
-- **THEN** the notification toggle and verdict control SHALL reflect the currently persisted settings
+### Requirement: EDSM settings presented as one section
 
-### Requirement: Notification controls depend on auto-lookups
+**Reason**: Grouping write credentials, keyless read lookups, and notification preferences under a single vendor-named heading implied that the API key gates lookups, which it does not.
 
-The notification controls SHALL be presented as dependent on EDSM auto-lookups. When auto-lookups are disabled the controls MUST be shown in a visibly inactive state, because without lookups there is no verdict to notify on.
-
-#### Scenario: Controls inactive when lookups are off
-
-- **WHEN** EDSM auto-lookups are disabled
-- **THEN** the notification toggle and verdict control SHALL be shown in a visibly inactive state
-
-#### Scenario: Controls active when lookups are on
-
-- **WHEN** EDSM auto-lookups are enabled
-- **THEN** the notification toggle and verdict control SHALL be active and adjustable
-
-### Requirement: Panel rendering unaffected by notifications
-
-The panel's existing worth-scanning display SHALL be unchanged by the notification feature. The panel MUST continue to render the verdict, value, and priority bodies for the current system regardless of whether a notification was raised for it.
-
-#### Scenario: Panel shows verdict when notifications are off
-
-- **WHEN** notifications are disabled and an arrival produces a verdict
-- **THEN** the panel SHALL display that verdict exactly as before this change
-
-#### Scenario: Panel shows verdict for a suppressed verdict
-
-- **WHEN** an arrival produces a red verdict, which never notifies
-- **THEN** the panel SHALL still display the red verdict and its value context
+**Migration**: Covered by the `EDSM settings split by access path` requirement above; both groups remain adjacent within Setup, so the settings are still grouped, but by access path rather than vendor.

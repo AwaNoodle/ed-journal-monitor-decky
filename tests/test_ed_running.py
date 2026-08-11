@@ -69,7 +69,7 @@ class TestSetEdRunning:
         })
         assert emitted_events[1] == ("edsm_next_hop", {
             "system": None, "scoopable": None, "starClass": None, "verdict": None,
-            "source": "edsm", "totalValue": None, "priorityBodies": [],
+            "source": "edsm", "totalValue": None, "priorityBodies": [], "reason": "disabled",
         })
         assert emitted_events[2] == ("ed_state_change", {"ed_running": False})
 
@@ -127,7 +127,7 @@ class TestSetEdRunning:
         })
         assert emitted_events[1] == ("edsm_next_hop", {
             "system": None, "scoopable": None, "starClass": None, "verdict": None,
-            "source": "edsm", "totalValue": None, "priorityBodies": [],
+            "source": "edsm", "totalValue": None, "priorityBodies": [], "reason": "disabled",
         })
         assert emitted_events[2] == ("ed_state_change", {"ed_running": False})
 

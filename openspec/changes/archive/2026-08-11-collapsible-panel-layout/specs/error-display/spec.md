@@ -1,7 +1,5 @@
-## Purpose
+## MODIFIED Requirements
 
-Surface recent upload failures and activity to the user in the Decky panel.
-## Requirements
 ### Requirement: Display recent errors panel
 Failed uploads SHALL be surfaced within the merged Data flow activity feed rather than in a separate panel section, so that a failure is read alongside the attempts that surrounded it. Each failure row SHALL show its details, including the target the failed upload was sent to. Failures from any target (EDDN and EDSM) SHALL appear. The Data flow section's collapsed header SHALL carry the failure count, and the section SHALL start expanded when that count is greater than zero.
 
@@ -47,15 +45,3 @@ The frontend SHALL display, within the Data flow section, a single time-ordered 
 #### Scenario: Feed reachable without leaving the flight view
 - **WHEN** the panel is opened and no failures have occurred
 - **THEN** the feed SHALL be collapsed behind the Data flow header, contributing no focus stops until expanded
-
-### Requirement: Enhance last upload display with event name
-The frontend SHALL display the event name alongside the last upload timestamp.
-
-#### Scenario: Last upload was a successful FSDJump
-- **WHEN** the last successful upload was a FSDJump event
-- **THEN** the "Last Upload" field SHALL show both the timestamp and the event name (e.g. "FSDJump — 14:32:05")
-
-#### Scenario: No uploads yet
-- **WHEN** no successful uploads have occurred
-- **THEN** the "Last Upload" field SHALL display "No uploads yet"
-
