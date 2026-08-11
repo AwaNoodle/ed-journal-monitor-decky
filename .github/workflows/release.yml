@@ -38,7 +38,7 @@ jobs:
         run: npm run lint:ts
 
       - name: Install Python dependencies
-        run: pip install ruff pytest pytest-asyncio
+        run: pip install -r requirements-dev.txt
 
       - name: Lint backend
         run: ruff check src/modules/ tests/
