@@ -19,6 +19,7 @@ push is automated by `.github/workflows/release.yml`.
 | Roll up the changelog | edit `CHANGELOG.md` (see below) |
 | Commit | `git add package.json package-lock.json CHANGELOG.md && git commit -m "chore: release v<version>"` |
 | PR | `gh pr create --title "chore: release v<version>"` |
+| Gate | Wait for the Build workflow to pass on the PR |
 | Merge | Squash merge into `main` |
 | Tag the merged commit | `git checkout main && git pull --ff-only && git tag v<version>` |
 | Publish | `git push --tags` |
@@ -62,12 +63,23 @@ Release commits go through a PR like any other change - `main` takes no direct p
    git commit -m "chore: release v<version>"
    ```
 
-5. Open the PR (`chore: release v<version>`) and squash merge it. **Do not tag on this branch** -
-   squash-merging discards the branch commit, so the tag has to land on the commit that ends up
-   on `main`.
+5. Open the PR (`chore: release v<version>`). Body should state the version bump, the changelog
+   roll-up, a one-line summary of what's in the release, and the local verification results.
 
-   PR body should state the version bump, the changelog roll-up, a one-line summary of what's in
-   the release, and the local verification results.
+   **Wait for the Build workflow to go green before merging.** `.github/workflows/build.yml` runs
+   on every PR and executes the same lint → ruff → pytest → `npm run package` sequence the Release
+   workflow will run on the tag, on the same Node 20 / Python 3.9 setup - so it is a dry run of
+   the tag build, against the bumped `package.json`. Merging on red commits you to a release run
+   that fails *after* the tag exists, which is the awkward direction to recover from.
+
+   Build does not cover the release-specific steps, which only ever run on the tag: the `awk`
+   extraction of the changelog section, the zip rename, and `gh release create`. A malformed
+   `## [<version>]` header passes Build and surfaces only as bare release notes on the published
+   Release - so proofread that section in the PR diff by eye.
+
+6. Squash merge. **Do not tag on this branch** - squash-merging discards the branch commit, so the
+   tag has to land on the commit that ends up on `main`. Build runs once more on the merge push;
+   let it go green before tagging.
 
 ## Publishing
 
@@ -105,3 +117,4 @@ Watch the run: `gh run watch` or `gh run list --workflow=release.yml`.
 | Wrong changelog header format | The `awk` extractor matches `^## \[<version>\]` exactly; anything else yields the fallback notes |
 | Hand-creating the GitHub Release, then pushing the tag | Duplicate/conflicting release; `gh release create` in the workflow fails |
 | Pushing with `git push` only | Tags are not pushed by default - no tag, no workflow, no release |
+| Merging the release PR on a red Build | The tag build fails the same way, but after the tag exists |
