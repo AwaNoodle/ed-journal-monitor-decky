@@ -53,20 +53,15 @@ jobs:
         run: mv ed-journal-monitor.zip "ed-journal-monitor-decky-${TAG}.zip"
 
       # On a tag push, create the GitHub Release. Its notes come from the
-      # matching CHANGELOG.md section. A release created here with GITHUB_TOKEN
-      # does NOT re-trigger the `release: published` job, so no double run.
+      # matching CHANGELOG.md section; extract-release-notes.sh fails the job
+      # if that section is missing rather than publishing bare notes. A
+      # release created here with GITHUB_TOKEN does NOT re-trigger the
+      # `release: published` job, so no double run.
       - name: Create GitHub Release
         if: github.event_name == 'push'
         run: |
           version="${TAG#v}"
-          awk -v ver="$version" '
-            $0 ~ ("^## \\[" ver "\\]") { flag = 1; next }
-            flag && /^## \[/ { exit }
-            flag { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "Release ${TAG}" > release-notes.md
-          fi
+          bash scripts/extract-release-notes.sh "$version" CHANGELOG.md > release-notes.md
           gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
 
       - name: Upload release asset
