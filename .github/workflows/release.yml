@@ -64,6 +64,29 @@ jobs:
       - name: Rename zip with version
         run: mv ed-journal-monitor.zip "ed-journal-monitor-decky-${TAG}.zip"
 
+      # Verify the artifact actually contains a working plugin before it is
+      # attached to a release. `jq` and `unzip` are preinstalled on the runner.
+      - name: Verify package contents
+        run: |
+          zip="ed-journal-monitor-decky-${TAG}.zip"
+          for path in \
+            ed-journal-monitor/package.json \
+            ed-journal-monitor/plugin.json \
+            ed-journal-monitor/main.py \
+            ed-journal-monitor/dist/index.js
+          do
+            unzip -l "$zip" | grep -q "$path\$" || {
+              echo "::error::$path missing from $zip"; exit 1; }
+          done
+          unzip -l "$zip" | grep -q "ed-journal-monitor/bin/src/modules/" || {
+            echo "::error::backend modules missing from $zip"; exit 1; }
+          zipped=$(unzip -p "$zip" ed-journal-monitor/package.json | jq -r .version)
+          if [ "v$zipped" != "$TAG" ]; then
+            echo "::error::bundled package.json is $zipped, expected ${TAG#v}"
+            exit 1
+          fi
+          echo "$zip verified: version $zipped, all expected paths present"
+
       # On a tag push, create the GitHub Release. Its notes come from the
       # matching CHANGELOG.md section; extract-release-notes.sh fails the job
       # if that section is missing rather than publishing bare notes. A
