@@ -24,7 +24,24 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      # fetch-depth: 0 so the ancestry check below has real history to walk.
+      # A shallow clone can report a wrong answer when the merge base lies
+      # beyond the fetched depth.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A tag matching v* fires this workflow wherever it points, so without
+      # this a tag on an unmerged branch would publish a release from code
+      # that never went through a PR. Releases come from `main` only.
+      - name: Verify tag is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG ($GITHUB_SHA) is not on main - releases must be tagged on main"
+            exit 1
+          fi
+          echo "$TAG is on main"
 
       - uses: actions/setup-node@v4
         with:

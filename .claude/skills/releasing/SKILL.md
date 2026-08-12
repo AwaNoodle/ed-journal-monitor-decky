@@ -32,13 +32,14 @@ push is automated by `.github/workflows/release.yml`.
   suite). CI re-runs these on the tag, so a failure here becomes a failed release, not a caught one.
 - `CHANGELOG.md`'s `[Unreleased]` section has an entry for each change in the release. If it's
   empty or thin, the GitHub Release notes will be too - the workflow copies that section verbatim.
-- Four things are now enforced by CI rather than by care, and fail the release
-  run loudly: the tag must match `package.json`, the `## [<version>]` changelog
-  section must exist and be non-empty (checked early, so this one fails in
-  seconds), the packaged zip must contain the expected files including real
+- Five things are now enforced by CI rather than by care, and fail the release
+  run loudly: the tagged commit must be on `main`, the tag must match
+  `package.json`, the `## [<version>]` changelog section must exist and be
+  non-empty, the packaged zip must contain the expected files including real
   backend modules, and the bundled `package.json` must carry the tag's version.
-  You still want them right the first time - a guard firing after the tag is
-  pushed means burning a version number (see Recovery).
+  The first three are checked before the build, so they fail in seconds. You
+  still want them right the first time - a guard firing after the tag is pushed
+  means burning a version number (see Recovery).
 
 ## Choosing the version
 
@@ -86,8 +87,9 @@ Release commits go through a PR like any other change - `main` takes no direct p
    proofread that section in the PR diff by eye.
 
 6. Squash merge. **Do not tag on this branch** - squash-merging discards the branch commit, so the
-   tag has to land on the commit that ends up on `main`. Build runs once more on the merge push;
-   let it go green before tagging.
+   tag has to land on the commit that ends up on `main`. CI enforces this: a tag whose commit is
+   not an ancestor of `main` fails the run before anything is built. Build runs once more on the
+   merge push; let it go green before tagging.
 
 ## Publishing
 
@@ -148,7 +150,7 @@ v<version>`. Absent means nothing was published and the first path applies.
 | Mistake | Consequence |
 |---|---|
 | Tagging before bumping `package.json` | Caught by CI - the run fails at the version guard within seconds, but the tag already exists (see Recovery) |
-| Tagging on the release branch | Not caught - squash-merging discards that commit, so the tag points at history that is not on `main` |
+| Tagging on the release branch | Caught by CI - squash-merging discards that commit, so the tag is not on `main` and the run fails before anything is built |
 | Hand-editing `package.json` instead of `npm version` | Not caught - `package-lock.json` drifts out of sync |
 | Forgetting the changelog roll-up | Caught by CI - the early changelog check fails the run rather than publishing bare notes |
 | Wrong changelog header format | Caught by CI - the header must read exactly `## [<version>] - YYYY-MM-DD` |
