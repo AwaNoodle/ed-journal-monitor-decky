@@ -91,10 +91,13 @@ def test_empty_section_fails_loudly(tmp_path):
     assert "0.8.0" in result.stderr
 
 
-def test_version_is_matched_literally_not_as_a_regex(changelog):
-    """A regex-based matcher treats the dots as wildcards, so 0X7X0 would hit
-    the 0.7.0 section and publish notes under the wrong version."""
-    result = run("0X7X0", changelog)
+def test_version_is_matched_literally_not_as_a_regex(tmp_path):
+    """A regex matcher interpolates the version as the pattern, so the dots in
+    0.7.0 become wildcards and match a 0X7X0 header - publishing that section's
+    notes under the wrong version."""
+    path = tmp_path / "CHANGELOG.md"
+    path.write_text("# Changelog\n\n## [0X7X0] - 2026-07-28\n\n- Wrong section\n")
+    result = run("0.7.0", path)
     assert result.returncode == 1
 
 
