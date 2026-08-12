@@ -69,12 +69,17 @@ jobs:
       # if that section is missing rather than publishing bare notes. A
       # release created here with GITHUB_TOKEN does NOT re-trigger the
       # `release: published` job, so no double run.
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         if: github.event_name == 'push'
         run: |
           version="${TAG#v}"
           bash scripts/extract-release-notes.sh "$version" CHANGELOG.md > release-notes.md
-          gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists, updating its notes"
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
+          fi
 
       - name: Upload release asset
         run: gh release upload "$TAG" "ed-journal-monitor-decky-${TAG}.zip" --clobber
