@@ -33,20 +33,10 @@ jobs:
 
       # A tag matching v* fires this workflow wherever it points, so without
       # this a tag on an unmerged branch would publish a release from code
-      # that never went through a PR. Releases come from `main` only.
+      # that never went through a PR. Releases come from `main` only. Logic
+      # lives in scripts/verify-tag-on-main.sh so it has pytest coverage.
       - name: Verify tag is on main
-        run: |
-          # Compare against FETCH_HEAD, not origin/main: checking out a tag
-          # leaves a narrow fetch refspec, under which `git fetch origin main`
-          # never creates refs/remotes/origin/main. Naming it would abort with
-          # "Needed a single revision" and read as "not on main" - failing
-          # every legitimate release for the wrong reason.
-          git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-            echo "::error::$TAG ($GITHUB_SHA) is not on main - releases must be tagged on main"
-            exit 1
-          fi
-          echo "$TAG is on main"
+        run: bash scripts/verify-tag-on-main.sh "$GITHUB_SHA" "$TAG"
 
       - uses: actions/setup-node@v4
         with:
@@ -60,14 +50,9 @@ jobs:
       # package.json ships inside the zip and is read at runtime for the EDDN
       # softwareVersion header, so a tag/package.json mismatch publishes a
       # plugin that misreports itself. Fail before the expensive steps.
+      # Logic lives in scripts/verify-tag-version.sh so it has pytest coverage.
       - name: Verify tag matches package.json
-        run: |
-          pkg=$(node -p "require('./package.json').version")
-          if [ "v$pkg" != "$TAG" ]; then
-            echo "::error::tag $TAG does not match package.json version $pkg"
-            exit 1
-          fi
-          echo "tag $TAG matches package.json $pkg"
+        run: bash scripts/verify-tag-version.sh "$TAG"
 
       # Extract-release-notes.sh is the same script the release step relies
       # on; run it here too so a missing changelog section fails fast rather
@@ -98,30 +83,14 @@ jobs:
         run: mv ed-journal-monitor.zip "ed-journal-monitor-decky-${TAG}.zip"
 
       # Verify the artifact actually contains a working plugin before it is
-      # attached to a release. `jq` and `unzip` are preinstalled on the runner.
+      # attached to a release. `jq` and `unzip` are preinstalled on the
+      # runner. Logic lives in scripts/verify-package-contents.sh so it has
+      # pytest coverage - #14 found a real vacuous-check bug here (a
+      # backend-modules regex that matched the bare directory entry with no
+      # .py files inside it) by manual mutation testing; that mutation is now
+      # one of the script's pytest fixtures.
       - name: Verify package contents
-        run: |
-          zip="ed-journal-monitor-decky-${TAG}.zip"
-          listing=$(unzip -Z1 "$zip")
-          for path in \
-            ed-journal-monitor/package.json \
-            ed-journal-monitor/plugin.json \
-            ed-journal-monitor/main.py \
-            ed-journal-monitor/dist/index.js
-          do
-            printf '%s\n' "$listing" | grep -Fxq "$path" || {
-              echo "::error::$path missing from $zip"; exit 1; }
-          done
-          printf '%s\n' "$listing" | grep -Eq '^ed-journal-monitor/bin/src/modules/.+\.py$' || {
-            echo "::error::no backend python modules in $zip"; exit 1; }
-          printf '%s\n' "$listing" | grep -Fxq 'ed-journal-monitor/bin/src/modules/watcher.py' || {
-            echo "::error::ed-journal-monitor/bin/src/modules/watcher.py missing from $zip"; exit 1; }
-          zipped=$(unzip -p "$zip" ed-journal-monitor/package.json | jq -r .version)
-          if [ "v$zipped" != "$TAG" ]; then
-            echo "::error::bundled package.json is $zipped, expected ${TAG#v}"
-            exit 1
-          fi
-          echo "$zip verified: version $zipped, all expected paths present"
+        run: bash scripts/verify-package-contents.sh "ed-journal-monitor-decky-${TAG}.zip" "$TAG"
 
       # On a tag push, create the GitHub Release. Its notes come from the
       # matching CHANGELOG.md section; extract-release-notes.sh fails the job

@@ -22,9 +22,16 @@ fi
 
 # Literal prefix matching, not a regex: interpolating the version into a
 # regex makes the dots wildcards, so 0.7.0 would also match 0X7X0.
+#
+# The section-end check matches "## " (any h2), not "## [" (only bracketed
+# version headers): a bracket-less "## Heading" following a version section
+# would otherwise never terminate it and get swallowed into the release
+# notes. "### " subsections must not trip this - they are two characters
+# longer than the "## " prefix being matched, so the prefix check on their
+# first three characters ("###") never equals "## ".
 notes=$(awk -v hdr="## [$VERSION]" '
   index($0, hdr) == 1 { flag = 1; next }
-  flag && index($0, "## [") == 1 { exit }
+  flag && index($0, "## ") == 1 { exit }
   flag { print }
 ' "$CHANGELOG")
 
