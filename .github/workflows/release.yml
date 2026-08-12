@@ -36,8 +36,13 @@ jobs:
       # that never went through a PR. Releases come from `main` only.
       - name: Verify tag is on main
         run: |
+          # Compare against FETCH_HEAD, not origin/main: checking out a tag
+          # leaves a narrow fetch refspec, under which `git fetch origin main`
+          # never creates refs/remotes/origin/main. Naming it would abort with
+          # "Needed a single revision" and read as "not on main" - failing
+          # every legitimate release for the wrong reason.
           git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
             echo "::error::$TAG ($GITHUB_SHA) is not on main - releases must be tagged on main"
             exit 1
           fi
