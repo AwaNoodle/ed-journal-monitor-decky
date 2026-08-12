@@ -31,6 +31,18 @@ jobs:
         with:
           python-version: '3.9'
 
+      # package.json ships inside the zip and is read at runtime for the EDDN
+      # softwareVersion header, so a tag/package.json mismatch publishes a
+      # plugin that misreports itself. Fail before the expensive steps.
+      - name: Verify tag matches package.json
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          if [ "v$pkg" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "tag $TAG matches package.json $pkg"
+
       - name: Install Node dependencies
         run: npm ci
 
