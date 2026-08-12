@@ -32,6 +32,13 @@ push is automated by `.github/workflows/release.yml`.
   suite). CI re-runs these on the tag, so a failure here becomes a failed release, not a caught one.
 - `CHANGELOG.md`'s `[Unreleased]` section has an entry for each change in the release. If it's
   empty or thin, the GitHub Release notes will be too - the workflow copies that section verbatim.
+- Four things are now enforced by CI rather than by care, and fail the release
+  run loudly: the tag must match `package.json`, the `## [<version>]` changelog
+  section must exist and be non-empty (checked early, so this one fails in
+  seconds), the packaged zip must contain the expected files including real
+  backend modules, and the bundled `package.json` must carry the tag's version.
+  You still want them right the first time - a guard firing after the tag is
+  pushed means burning a version number (see Recovery).
 
 ## Choosing the version
 
@@ -72,10 +79,11 @@ Release commits go through a PR like any other change - `main` takes no direct p
    the tag build, against the bumped `package.json`. Merging on red commits you to a release run
    that fails *after* the tag exists, which is the awkward direction to recover from.
 
-   Build does not cover the release-specific steps, which only ever run on the tag: the `awk`
-   extraction of the changelog section, the zip rename, and `gh release create`. A malformed
-   `## [<version>]` header passes Build and surfaces only as bare release notes on the published
-   Release - so proofread that section in the PR diff by eye.
+   Build does not cover the release-specific steps, which only run once the tag is pushed: the
+   changelog-section check (`scripts/extract-release-notes.sh`), the zip contents check, and
+   creating the GitHub Release. A malformed `## [<version>]` header passes Build clean and only
+   fails once tagged - fast, within seconds, but after the tag already exists (see Recovery) - so
+   proofread that section in the PR diff by eye.
 
 6. Squash merge. **Do not tag on this branch** - squash-merging discards the branch commit, so the
    tag has to land on the commit that ends up on `main`. Build runs once more on the merge push;
@@ -105,16 +113,47 @@ Watch the run: `gh run watch` or `gh run list --workflow=release.yml`.
 - `gh release view v<version>` - notes match the changelog section, zip asset attached.
 - The zip is named `ed-journal-monitor-decky-v<version>.zip` (tag included, `v` and all).
 - `package.json` on `main` reads `<version>` - this is what Decky displays on-device.
+- The version, changelog, and zip-contents checks all ran in CI - a green
+  release run means those are already confirmed. What still needs human eyes is
+  whether the notes *read* well, which no guard can judge.
+
+## Recovery
+
+A pushed tag with a published Release is spent. Do not retag it: anyone who
+already fetched the tag keeps the old commit, and a moved tag is worse than a
+skipped version number.
+
+**Guard fired, no Release created** (version mismatch, missing changelog
+section, bad zip - all of these fail before the release is created). The tag
+exists but nothing was published, so the number is still safely reusable:
+
+```
+git push --delete origin v<version>
+git tag -d v<version>
+```
+
+Fix the cause on a new PR, merge, then tag and push again.
+
+**Release already published and wrong.** The number is spent. Fix forward with
+the next patch version - a fresh PR bumping to `<version>+1` with a changelog
+entry describing the fix. If the bad release is actively harmful, mark it as a
+pre-release (`gh release edit v<version> --prerelease`) or delete the Release
+while leaving the tag, so the version is never silently reused.
+
+**Uncertain whether the run got as far as publishing:** `gh release view
+v<version>`. Absent means nothing was published and the first path applies.
 
 ## Common mistakes
 
 | Mistake | Consequence |
 |---|---|
-| Tagging before bumping `package.json` | Decky shows the old version on-device; the zip is built from the tag |
-| Tagging on the release branch | Tag points at the pre-squash commit, which isn't on `main` |
-| Hand-editing `package.json` instead of `npm version` | `package-lock.json` drifts out of sync |
-| Empty or missing `## [<version>]` changelog section | Workflow falls back to bare notes: `Release v<version>` |
-| Wrong changelog header format | The `awk` extractor matches `^## \[<version>\]` exactly; anything else yields the fallback notes |
-| Hand-creating the GitHub Release, then pushing the tag | Duplicate/conflicting release; `gh release create` in the workflow fails |
-| Pushing with `git push` only | Tags are not pushed by default - no tag, no workflow, no release |
-| Merging the release PR on a red Build | The tag build fails the same way, but after the tag exists |
+| Tagging before bumping `package.json` | Caught by CI - the run fails at the version guard within seconds, but the tag already exists (see Recovery) |
+| Tagging on the release branch | Not caught - squash-merging discards that commit, so the tag points at history that is not on `main` |
+| Hand-editing `package.json` instead of `npm version` | Not caught - `package-lock.json` drifts out of sync |
+| Forgetting the changelog roll-up | Caught by CI - the early changelog check fails the run rather than publishing bare notes |
+| Wrong changelog header format | Caught by CI - the header must read exactly `## [<version>] - YYYY-MM-DD` |
+| A `npm run package` regression dropping a file | Caught by CI - the zip smoke check fails before the asset is attached |
+| Leaving a draft Release on the tag | Handled - the workflow force-publishes it (`--draft=false`) rather than silently uploading into the draft |
+| Hand-creating the GitHub Release, then pushing the tag | Partly handled - the concurrency group stops the two runs racing, but the workflow will still overwrite your hand-written notes with the changelog section |
+| Pushing with `git push` only | Not caught - tags are not pushed by default, so nothing runs at all and there is no failure to see |
+| Merging the release PR on a red Build | Not caught - the tag build fails the same way, but after the tag exists |
