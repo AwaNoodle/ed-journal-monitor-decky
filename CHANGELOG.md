@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-12
+
 ### Changed
 
 - **Reorganised the panel by how often you actually look at each part**: a health strip, Navigation, and Session are now always visible at the top, while Data flow, Setup, and Troubleshooting collapse behind expandable headers that summarise their state — cutting the number of gamepad D-pad stops needed to reach in-flight information. The Next hop preview is now always shown, including stating plainly when the destination has been reached. The **Find Nearest Scoopable Star** button now turns EDSM lookups on for you if they're off, instead of just telling you to enable them.
