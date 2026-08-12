@@ -113,6 +113,46 @@ def test_missing_changelog_file_is_a_usage_error(tmp_path):
     assert result.returncode == 2
 
 
+def test_stops_at_a_bracket_less_heading(tmp_path):
+    """A bracket-less '## Heading' (no version) following the target section
+    must still terminate it - the terminator check must not require the
+    literal '## [' prefix, or such a heading (and everything after it) gets
+    swallowed into the release notes."""
+    path = tmp_path / "CHANGELOG.md"
+    path.write_text(
+        "# Changelog\n\n"
+        "## [0.7.0] - 2026-07-28\n\n"
+        "- Worth-scanning arrival notifications\n\n"
+        "## Older releases\n\n"
+        "- Ancient history\n"
+    )
+    result = run("0.7.0", path)
+    assert result.returncode == 0
+    assert "Worth-scanning arrival notifications" in result.stdout
+    assert "Older releases" not in result.stdout
+    assert "Ancient history" not in result.stdout
+
+
+def test_does_not_stop_at_a_subsection_heading(tmp_path):
+    """'### Fixed' etc. are subsections within a version's own notes, not
+    section terminators - they must stay in the extracted notes."""
+    path = tmp_path / "CHANGELOG.md"
+    path.write_text(
+        "# Changelog\n\n"
+        "## [0.7.0] - 2026-07-28\n\n"
+        "### Added\n\n"
+        "- A feature\n\n"
+        "### Fixed\n\n"
+        "- A bug\n"
+    )
+    result = run("0.7.0", path)
+    assert result.returncode == 0
+    assert "### Added" in result.stdout
+    assert "### Fixed" in result.stdout
+    assert "A feature" in result.stdout
+    assert "A bug" in result.stdout
+
+
 def test_real_changelog_latest_release_has_notes():
     """Regression guard against the committed CHANGELOG.md: the most recent
     released version must still extract non-empty notes."""
