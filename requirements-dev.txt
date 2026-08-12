@@ -1,0 +1,6 @@
+# Dev/CI tooling only. The shipped plugin backend is stdlib-only - nothing
+# here is installed onto the device. Pinned so a new tool release cannot
+# fail a release build for code that did not change.
+ruff==0.15.12
+pytest==8.4.2
+pytest-asyncio==1.2.0
