@@ -1,5 +1,16 @@
 # Troubleshooting
 
+### Diagnostic Bundle
+
+The **Create Diagnostic Bundle** button in the plugin's Troubleshooting section writes a zip to `$DECKY_PLUGIN_SETTINGS_DIR/ed-jm-diagnostics.zip`. Attach it when raising an issue.
+
+| File | Contents |
+|------|----------|
+| `runtime_state.json` | Python version, plugin version, watcher state, file positions, known files, settings summary, submitter stats |
+| `settings.json` | Raw settings dump |
+| `plugin.json` | Plugin metadata |
+| `plugin.log` | Decky plugin log (if available) |
+
 ### SSL/Certificate Errors
 
 Decky Loader embeds Python 3.11 via PyInstaller, which may not find system CA certificates. If you see upload failures with SSL errors:

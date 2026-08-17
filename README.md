@@ -1,232 +1,185 @@
-# ED Journal Monitor — Decky Plugin
+<img src="assets/logo.png" alt="ED Journal Monitor" width="96" align="left">
+
+# ED Journal Monitor
+
+**Contribute to EDDN from your Steam Deck, without ever leaving Game Mode.**
 
 [![Build](https://github.com/AwaNoodle/ed-journal-monitor-decky/actions/workflows/build.yml/badge.svg)](https://github.com/AwaNoodle/ed-journal-monitor-decky/actions/workflows/build.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/AwaNoodle/ed-journal-monitor-decky)](https://github.com/AwaNoodle/ed-journal-monitor-decky/releases)
+[![License: MIT](https://img.shields.io/github/license/AwaNoodle/ed-journal-monitor-decky)](LICENSE)
 
-A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin for Steam Deck that monitors Elite Dangerous journal files and submits events to the [Elite Dangerous Data Network (EDDN)](https://eddn.edcd.io/).
+A [Decky](https://github.com/SteamDeckHomebrew/decky-loader) plugin that watches your Elite Dangerous journal files and submits events to the [Elite Dangerous Data Network (EDDN)](https://eddn.edcd.io/) - and, optionally, to your [EDSM](https://www.edsm.net/) commander profile.
+
+## Why
+
+[EDMC](https://github.com/EDCD/EDMarketConnector) is the established way to feed EDDN, and it can be run on a Steam Deck. This plugin is an alternative for people already running Decky who would rather stay in Game Mode.
+
+It lives in the quick access menu alongside your other plugins, starts and stops with the game, needs no root access, and finds your journal directory by itself on Steam installs. Set it up once and forget it exists.
+
+It also uses that same journal stream to tell you things while you fly - whether the system you just arrived in is worth scanning, what your next hop looks like before you jump, and where the nearest fuel-scoopable star is.
+
+## Screenshots
+
+<!--
+  TODO: capture and add.
+  1. assets/screenshot-panel.png - quick access panel open in Game Mode, showing the
+     health strip, Navigation (with a worth-scanning chip + next hop), and Session counters.
+  2. assets/screenshot-toast.png - a worth-scanning toast over the running game.
+  Then replace this comment with the image tags.
+-->
+
+_Not captured yet._
 
 ## Features
 
-- **Live session dashboard**: A glanceable summary of your current ED game launch — current system, jumps, distance travelled, bodies scanned, and first discoveries — always visible at the top of the panel, no expanding required
-- **Hands-off operation**: Automatically detects when Elite Dangerous starts and stops, beginning/ending journal monitoring accordingly
-- **Auto-discovery**: Finds the ED journal directory by scanning Steam's library configuration — no manual setup required for Steam installs
-- **EDDN submission**: Validates and submits journal/1 events plus Market/Outfitting/Shipyard auxiliary schemas to EDDN
-- **EDSM forwarding (opt-in)**: Optionally forwards your raw journal events to your [EDSM](https://www.edsm.net/) profile under your own credentials, alongside and fully isolated from EDDN. Off by default — EDSM uploads are identifiable (tied to your named account), so you enable it by entering an API key
-- **EDSM worth-scanning lookup (opt-in)**: On arrival in a system, looks up EDSM's public body data and displays a glanceable chip in the Navigation section — green (unknown/unexplored), yellow (partially explored), or red (fully explored per EDSM). Labelled as EDSM-sourced; no API key required. Off by default; enable it with the **Enable EDSM lookup** toggle in Setup ▸ EDSM lookups
-- **EDSM system value lookup (opt-in)**: Alongside the worth-scanning chip, shows the arrived system's EDSM-estimated scan value and its top priority (highest-value) bodies. The figure is a floor — EDSM's known bodies only, no first-mapped bonus. Shares the same lookup, cache, and **Enable EDSM lookup** toggle as the worth-scanning chip; no separate setting
-- **EDSM next-in-route hop preview (opt-in)**: When you plot a route, the Navigation section previews the **next hop** before you jump — the next system's name, its primary-star **scoopability** (fuel safety, from the plotted route's star class), and its EDSM verdict/value when available. Derived from `NavRoute.json`, advances after each jump, and updates live when you re-plot. Always shown — states plainly when there's no route, you've reached the destination, you're off route, or lookups are disabled. Shares the same read client, cache, and **Enable EDSM lookup** toggle; the previewed system is usually already cached by the time you arrive
-- **Worth-scanning notifications (opt-in)**: A Steam toast on arrival in a system worth scanning, visible over the running game without opening the quick access menu — the point being to decide whether to honk without leaving the cockpit. Off by default; enable with the **'Worth-scanning' Notifications** toggle in Setup ▸ EDSM lookups. A second toggle controls the threshold: green-only (default) or green **and** yellow. Red and neutral verdicts never notify. Tapping the toast opens the plugin's quick access tab. No sound and no dedupe — see [Configuration](#worth-scanning-notifications-optional) for details and limitations
-- **Nearest scoopable star (opt-in, on demand)**: A **Find Nearest Scoopable Star** button in the Navigation section queries EDSM's `sphere-systems` endpoint around your current system (bounded 25 ly radius) and reports the closest system with a fuel-scoopable (KGBFOAM) primary star — name, distance, and star class. Triggered on demand only (not on every arrival) to keep sphere-query traffic minimal. If EDSM lookups are off, pressing the button turns them on and runs the search in one action. Handles "none found nearby" explicitly rather than showing an error
-- **No root access required**: All operations use user-accessible filesystem paths
-- **Steam Deck optimized**: Lightweight polling-based watcher (default 10s interval), minimal resource usage
-- **Diagnostic bundle**: Package log files, settings, and runtime state into a zip for offline troubleshooting
-- **Detailed logging toggle**: Increase log verbosity from INFO to DEBUG for richer diagnostic capture
-- **Activity log & error display**: See recent upload activity and errors in real-time, with event-level detail on failures
-- **Auto uploader ID**: Automatically sets your EDDN uploader ID from your CMDR name when a game session loads
+- **Built for the Deck** - no root access, lightweight polling watcher, and a panel ordered so in-flight information is visible without scrolling past setup controls
+- **Hands-off EDDN submission** - detects when Elite Dangerous starts and stops, and submits journal, market, outfitting, shipyard, and exploration events without you touching anything
+- **Live session dashboard** - jumps, distance travelled, bodies scanned, and first discoveries for the current game launch
+- **Automatic setup** - finds your journal directory by scanning Steam's library configuration, and fills in your EDDN uploader ID from your CMDR name
+- **In-flight navigation aids** (optional) - on arrival, an EDSM-sourced verdict on whether the system is worth scanning and its estimated scan value; a preview of your next hop and whether its star is scoopable; and an on-demand search for the nearest scoopable star
+- **Arrival notifications** (optional) - a Steam toast when you jump into a system worth scanning, visible over the running game, so you can decide whether to honk without opening a menu
+- **EDSM forwarding** (optional) - mirror your journal to your own EDSM commander profile, fully isolated from EDDN so a failure on one never affects the other
+- **Diagnostics** - a detailed logging toggle and a one-button diagnostic bundle for when something needs investigating
+
+## Requirements
+
+- A Steam Deck (or other SteamOS / Linux handheld) running [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)
+- Elite Dangerous installed - via Steam for automatic journal discovery, or any other launcher with a [manually configured path](#journal-path)
 
 ## Installation
 
-### From Decky Plugin Store
+The plugin is not yet listed in the Decky Plugin Store, so install it from a release zip.
 
-1. Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) on your Steam Deck
-2. Install this plugin from the Decky plugin store *(pending acceptance — use Manual Install for now)*
-
-### Manual Install
-
-1. Build and package the plugin:
+1. Download `ed-journal-monitor.zip` from the [latest release](https://github.com/AwaNoodle/ed-journal-monitor-decky/releases/latest), or build it yourself (see [Contributing](#contributing)).
+2. Copy it to your Deck, either by switching to Desktop Mode and copying to `~/Documents/`, or over the network:
    ```bash
-   npm install
-   npm run package
+   scp ed-journal-monitor.zip deck@<steamdeck-ip>:~/Documents/
    ```
-2. Copy `ed-journal-monitor.zip` to your Steam Deck:
-   - **USB**: Switch to Desktop Mode, connect via USB, and copy the file to `~/Documents/`
-   - **SCP**: `scp ed-journal-monitor.zip deck@<steamdeck-ip>:~/Documents/`
-3. Enable Developer Mode in Decky settings
-4. Install the zip directly via Decky's "Install Plugin from ZIP" option
+3. In Decky's settings, enable **Developer Mode**.
+4. Use **Install Plugin from ZIP** and select the file.
 
-## UI Panel
+## Quick start
 
-The panel is ordered by how often you actually look at each part, not by subject. A single-line **health strip** at the top and the **Navigation** and **Session** sections below it are always visible; everything configured once and rarely revisited lives behind collapsible sections further down, so reaching in-flight information never means scrolling or navigating past setup controls.
+Once installed, there is nothing to configure for a standard Steam install:
 
-- **Health strip**: One always-visible line reporting the most urgent status — watching, waiting for Elite Dangerous, paused, running-but-not-watching, or no journal path configured (with a pointer to Setup)
-- **Navigation**: The current system, an optional EDSM worth-scanning chip (green/yellow/red, EDSM-attributed), and an optional EDSM system value display (estimated total value + top priority bodies). A **Next hop** block previews the next system in the plotted route — name, scoopability (fuel safety), and EDSM verdict/value when available — and is always shown, stating why there's no preview (no route plotted, destination reached, off route, or lookups disabled) when there isn't one. A **Find Nearest Scoopable Star** button looks up the closest fuel-scoopable system on demand; if EDSM lookups are off, pressing it turns them on and runs the search in the same action
-- **Session**: A 2×2 grid of counters — jumps, distance in ly, bodies scanned, first discoveries. Resets on each game launch; shows a neutral empty state before any events are seen
-- **Data flow** *(collapsed by default; expands automatically if there are failed uploads)*: Per-target upload counts (✅ success / ❌ failed for each of EDDN and EDSM), and a single time-ordered feed of the last 10 upload attempts — successes and failures together, each tagged with its target and, for failures, the error classification, message, and HTTP status. The collapsed header shows the aggregate success/failure counts
-- **Setup** *(collapsed by default)*: Four independently-expandable groups — **Journal path** (the **Watch journal** toggle, path display, path source, re-scan button, manual path input), **EDDN** (uploader ID input, notice when unset), **EDSM account** (commander name + API key inputs, identifiability notice, link to where the key is generated, status), and **EDSM lookups** (the **Enable EDSM lookup** toggle, the **'Worth-scanning' Notifications** toggle, and the green-only/all-verdicts threshold toggle)
-- **Troubleshooting** *(collapsed by default)*: Detailed logging toggle, create diagnostic bundle button, bundle result (path + size)
+1. Launch Elite Dangerous.
+2. Open the Decky quick access menu and select **ED Journal Monitor**.
+3. The health strip at the top should read **Watching**.
 
+That's it - events are being submitted. The panel is ordered by how often you look at each part: the health strip, **Navigation**, and **Session** are always visible, while **Data flow**, **Setup**, and **Troubleshooting** stay collapsed until you need them.
+
+### Confirming your data is arriving
+
+- **[EDDN Status Page](https://eddn.edcd.io/)** - a live feed of all EDDN submissions.
+- **[eddn-tail](https://github.com/AwaNoodle/eddn-tail)** - a CLI tool that tails the live feed. Filter by the system you're currently in and watch your own jumps and scans appear:
+  ```bash
+  eddn-tail --system "Sol"
+  ```
+  EDDN's relay obfuscates `uploaderID` to prevent long-term tracking of players, so you can't find your submissions by CMDR name - filtering by system is the practical way to spot them.
+- **Your EDSM profile** - if EDSM forwarding is enabled, recent jumps and scans should appear on [edsm.net](https://www.edsm.net/).
 
 ## Configuration
 
-On first launch, the plugin will automatically scan for your Elite Dangerous journal directory. If it's not found (e.g., ED not yet installed), it will re-scan when you start the game.
+Everything below lives under **Setup** in the plugin panel, except detailed logging.
 
-### Enable/Disable Monitor
+### Journal path
 
-Toggle the monitor on/off from the **Watch journal** toggle in Setup ▸ Journal path. When disabled, the watcher will not start even if ED is running; the health strip at the top of the panel shows watching as paused.
+The plugin scans for your journal directory on first launch, and re-scans when you start the game if it wasn't found. You only need to do something here if auto-detection fails - which it will for non-Steam installs such as Lutris, Heroic, flatpak, or a custom Wine prefix.
 
-### Manual Journal Path
+Under **Setup ▸ Journal path**, either press **Re-scan for Journal Path**, or enter the directory manually. A typical Proton path looks like:
 
-If auto-detection fails (non-Steam ED installs, Lutris, Heroic, flatpak, custom Wine prefixes):
-
-1. Open the plugin panel in Decky
-2. Enter the full path to your journal directory in "Manual Journal Path"
-3. Click "Set Manual Path"
-
-**Typical Proton journal path:**
 ```
 ~/.local/share/Steam/steamapps/compatdata/359320/pfx/drive_c/users/steamuser/Saved Games/Frontier Developments/Elite Dangerous
 ```
 
-> **Note:** The path finder scans `drive_c/users/*/Saved Games/...` — the username may differ from `steamuser` depending on your Proton configuration.
+> The scan looks under `drive_c/users/*/Saved Games/...` - your username may not be `steamuser` depending on your Proton configuration.
 
-You can also click **Re-scan for Journal Path** at any time to retry auto-detection.
+The same group holds the **Watch journal** toggle. Turning it off stops the watcher starting even while ED is running; the health strip then reports watching as paused.
 
 ### Uploader ID
 
-The plugin will automatically populate the uploader ID from your CMDR name when you start a new game. This identifies your submissions on the EDDN network.
+Set automatically from your CMDR name when a game session loads, and editable under **Setup ▸ EDDN**. EDDN asks senders for a meaningful identifier and recommends your CMDR name; its relay then obfuscates the value before messages reach listeners, so this is not published as-is.
 
-You can also set it manually in the plugin settings. EDDN recommends using your CMDR name.
+### Optional: EDSM lookups
 
-### EDSM Forwarding (optional)
+Under **Setup ▸ EDSM lookups**, the **Enable EDSM lookup** toggle (off by default) turns on all three navigation aids. They read EDSM's public API and need no account or API key.
 
-The plugin can also forward your journal events to your [EDSM](https://www.edsm.net/) profile, in addition to EDDN. This is **opt-in and off by default**: unlike EDDN's anonymous, hashed uploader IDs, **EDSM uploads are identifiable** — they are tied to your named EDSM account and land on your public/private commander profile (flight logs, visited systems, scans).
+- **Worth scanning** - on arrival, a green (unexplored), yellow (partially explored), or red (fully explored) chip based on EDSM's body data.
+- **System value** - EDSM's estimated scan value and the highest-value bodies. This is a floor: it covers only bodies EDSM knows about and excludes any first-mapped bonus.
+- **Next hop** - when a route is plotted, the next system's name, whether its primary star is scoopable, and its verdict and value. Scoopability comes from the route itself, so it works even when EDSM has no data. Always shown, and says plainly when there's no route, you've arrived, or you're off route.
+- **Find Nearest Scoopable Star** - an on-demand search of a 25 ly sphere for the closest system with a scoopable primary star. On demand rather than per-jump to keep traffic on EDSM's API low. If lookups are off, pressing the button turns them on and runs the search in one go.
 
-To enable it, open **Setup ▸ EDSM account** and enter:
+### Optional: worth-scanning notifications
 
-1. **EDSM Commander Name** — your commander name as registered on EDSM.
-2. **EDSM API Key** — generated at **Settings → My API Key** on EDSM: <https://www.edsm.net/en/settings/api>
+With lookups enabled, the **'Worth-scanning' Notifications** toggle raises a Steam toast on arrival in a system worth scanning - visible over the running game. A second toggle sets the threshold: green only (default), or green and yellow. Red and neutral verdicts never notify. Tapping the toast opens the plugin panel.
 
-The key's presence is the consent gate — once a key is saved, EDSM forwarding activates on the next game session. EDSM forwarding is fully isolated from EDDN: an EDSM error (e.g. wrong credentials, surfaced as a "check your EDSM credentials" message) never affects EDDN submission, and vice-versa. Only the Live game version is forwarded (Legacy is not). The EDSM account status line shows EDSM's own success/fail counts and last response message. Note that EDSM lookups (the worth-scanning chip, next-hop preview, nearest-scoopable search) live in the separate **Setup ▸ EDSM lookups** group and don't require this API key — only this write/forwarding path does.
+Two limitations worth knowing:
 
-### Worth-Scanning Notifications (optional)
+- **Steam can suppress the toast.** Steam's "notifications while in game" preference and Do Not Disturb both swallow it, outside this plugin's control. If you see nothing, check those first.
+- **No dedupe.** Suppression is per-arrival, so revisiting a system (A → B → A) notifies you again.
 
-When **Enable EDSM lookup** is on, the plugin can also raise a Steam toast on arrival in a system worth scanning — visible over the running game, no need to open the quick access menu. Off by default; enable it with the **'Worth-scanning' Notifications** toggle in **Setup ▸ EDSM lookups**. A second toggle sets the threshold: off (default) notifies on fully unexplored (green) systems only; on also notifies on partially-explored (yellow) systems. Fully-explored (red) and neutral verdicts never notify. Tapping the toast opens the plugin's quick access tab so you can read the full breakdown.
+### Optional: EDSM forwarding
 
-Two things to know:
+The plugin can forward your journal to your [EDSM](https://www.edsm.net/) commander profile alongside EDDN.
 
-- **Steam can suppress the toast.** Steam's own "notifications while in game" preference and Do Not Disturb mode both swallow the toast, outside the plugin's control — if you enable notifications and see nothing, check those Steam settings first.
-- **No dedupe.** Suppression is per-arrival only — if you revisit a system after leaving it (A → B → A), you'll be notified again for A on the second arrival. This is a known limitation, not a bug.
+> **This is identifiable.** Unlike EDDN's hashed uploader IDs, EDSM uploads are tied to your named account and appear on your commander profile - flight logs, visited systems, scans. It is off by default, and saving an API key is how you consent to it.
 
-### Detailed Logging
+Under **Setup ▸ EDSM account**, enter your commander name as registered on EDSM, and an API key from [Settings → My API Key](https://www.edsm.net/en/settings/api). Forwarding activates on the next game session.
 
-Toggle **Detailed Logging** in the Troubleshooting section to switch between INFO and DEBUG log verbosity. DEBUG logging produces richer diagnostic output for troubleshooting. This setting persists across restarts.
+It is fully isolated from EDDN - bad EDSM credentials surface as a "check your EDSM credentials" message and never affect EDDN submission, or vice versa. Only the Live game version is forwarded. Note that this key is only needed for forwarding; the EDSM lookups above work without one.
 
-## Verifying Your Submissions
+### Optional: detailed logging
 
-Once Elite Dangerous is running and the plugin's health strip shows **Watching**, your events should be submitted automatically. Here are a few ways to confirm your data is reaching EDDN:
-
-- **[EDDN Status Page](https://eddn.edcd.io/)** — Shows a live feed of all EDDN submissions across all users. Look for your `uploaderID` (your CMDR name) in the messages.
-- **EDSM** — If your EDSM account is linked, visit your commander profile on [edsm.net](https://www.edsm.net/) and check that your recent jumps and scans appear.
-- **[eddn-tail](https://github.com/AwaNoodle/eddn-tail)** — A lightweight CLI tool that tails the EDDN live feed. Filter by your uploader ID or by the system you're currently in to see your submissions in real time:
-  ```bash
-  # Filter by your CMDR name
-  eddn-tail --uploader "Your CMDR Name"
-  # Or filter by system
-  eddn-tail --system "Sol"
-  ```
-
-## EDDN Event Coverage
-
-Upload endpoint: `https://eddn.edcd.io:4430/upload/`
-
-Messages are sent with `softwareName: ED Journal Monitor Decky` in the EDDN header.
-
-### journal/1 Events
-
-Events submitted under the [journal/1](https://github.com/EDCD/EDDN/blob/live/schemas/journal/1/README.md) schema:
-
-| Event | Description |
-|-------|-------------|
-| FSDJump | System jump data |
-| Scan | Body scan data |
-| Location | Current location on load |
-| Docked | Station docking event |
-| CarrierJump | Fleet carrier jump arrival |
-| SAASignalsFound | SAA scan signals found |
-
-### Auxiliary Schema Events
-
-Events that read a sidecar JSON file and use a dedicated schema:
-
-| Journal Event | Auxiliary File | Schema |
-|---------------|----------------|--------|
-| Market | `Market.json` | [commodity/3](https://github.com/EDCD/EDDN/blob/live/schemas/commodity/3/README.md) |
-| Outfitting | `Outfitting.json` | [outfitting/2](https://github.com/EDCD/EDDN/blob/live/schemas/outfitting/2/README.md) |
-| Shipyard | `Shipyard.json` | [shipyard/2](https://github.com/EDCD/EDDN/blob/live/schemas/shipyard/2/README.md) |
-| NavRoute | `NavRoute.json` | [navroute/1](https://github.com/EDCD/EDDN/blob/live/schemas/navroute/1/README.md) |
-| FCMaterials | `FCMaterials.json` | [fcmaterials_journal/1](https://github.com/EDCD/EDDN/blob/live/schemas/fcmaterials_journal-README.md) |
-
-### Dedicated Schema Events
-
-Events with their own EDDN schema (not journal/1):
-
-| Event | Schema | Notes |
-|-------|--------|-------|
-| FSSSignalDiscovered | [fsssignaldiscovered/1](https://github.com/EDCD/EDDN/blob/live/schemas/fsssignaldiscovered/1/README.md) | Batched: signals accumulated and flushed on trigger events (FSSDiscoveryScan, SupercruiseEntry, Location, FSDJump, CarrierJump) |
-| FSSDiscoveryScan | [fssdiscoveryscan/1](https://github.com/EDCD/EDDN/blob/live/schemas/fssdiscoveryscan/1/README.md) | Requires `BodyCount`, `NonBodyCount`; `SystemName` → `StarSystem` rename |
-| ApproachSettlement | [approachsettlement/1](https://github.com/EDCD/EDDN/blob/live/schemas/approachsettlement/1/README.md) | Requires `Latitude`, `Longitude`, `BodyID`, `BodyName`, `MarketID`; `StationName` → `Name` rename |
-| CodexEntry | [codexentry/1](https://github.com/EDCD/EDDN/blob/live/schemas/codexentry/1/README.md) | Requires `Name`, `Region`, `EntryID`, `BodyID`, `BodyName` |
-| NavBeaconScan | [navbeaconscan/1](https://github.com/EDCD/EDDN/blob/live/schemas/navbeaconscan/1/README.md) | Requires `NumBodies` |
-| FSSAllBodiesFound | [fssallbodiesfound/1](https://github.com/EDCD/EDDN/blob/live/schemas/fssallbodiesfound-README.md) | Requires `Count`; `StarPos` augmented from session state |
-| ScanBaryCentre | [scanbarycentre/1](https://github.com/EDCD/EDDN/blob/live/schemas/scanbarycentre-README.md) | Requires `SystemAddress`, `BodyID`; `StarPos` augmented from session state |
-| FSSBodySignals | [fssbodysignals/1](https://github.com/EDCD/EDDN/blob/live/schemas/fssbodysignals-README.md) | Requires `BodyName`, `BodyID`, `SystemAddress`, `Signals`; `StarSystem`/`StarPos` augmented; nested `_Localised` stripped |
-| DockingGranted | [dockinggranted/1](https://github.com/EDCD/EDDN/blob/live/schemas/dockinggranted-README.md) | Requires `MarketID`, `StationName`; station-context (no `StarPos`) |
-| DockingDenied | [dockingdenied/1](https://github.com/EDCD/EDDN/blob/live/schemas/dockingdenied-README.md) | Requires `MarketID`, `StationName`, `Reason`; station-context (no `StarPos`) |
+The **Detailed Logging** toggle in the panel's **Troubleshooting** section switches log verbosity from INFO to DEBUG for richer diagnostic output. Persists across restarts.
 
 ## Troubleshooting
 
-See [troubleshooting.md](troubleshooting.md) for common issues and solutions.
+See [troubleshooting.md](troubleshooting.md) for SSL errors, journal path problems, submission failures, and detection issues.
 
-## Diagnostic Bundle
+If you need to raise an issue, the **Create Diagnostic Bundle** button under **Troubleshooting** packages logs, settings, and runtime state into a zip - attach it to your report.
 
-The **Create Diagnostic Bundle** button in the Troubleshooting section creates a zip file at `$DECKY_PLUGIN_SETTINGS_DIR/ed-jm-diagnostics.zip` containing:
+## Documentation
 
-| File | Contents |
-|------|----------|
-| `runtime_state.json` | Python version, plugin version, watcher state, file positions, known files, settings summary, submitter stats |
-| `settings.json` | Raw settings dump |
-| `plugin.json` | Plugin metadata |
-| `plugin.log` | Decky plugin log (if available) |
+| Document | Contents |
+|----------|----------|
+| [developer-guide.md](developer-guide.md) | Architecture, event flow, EDDN event coverage, known limitations |
+| [troubleshooting.md](troubleshooting.md) | Common problems and fixes |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [AGENTS.md](AGENTS.md) | Detailed conventions and module-level design notes |
 
-Share this zip file when requesting support.
+Events are submitted to `https://eddn.edcd.io:4430/upload/` under `softwareName: ED Journal Monitor Decky`, covering the `journal/1`, `commodity/3`, `outfitting/2`, `shipyard/2`, `navroute/1`, and several dedicated exploration and docking schemas. The full event-to-schema mapping is in the [developer guide](developer-guide.md#eddn-event-coverage).
 
-## Development
+## Contributing
 
-See [developer-guide.md](developer-guide.md) for architecture details, known limitations, and development setup.
+Contributions are welcome. Please read [AGENTS.md](AGENTS.md) first - it carries the conventions this repo actually enforces.
 
-### Prerequisites
-
-- Node.js (for frontend build)
-- Python 3.9+ (for backend)
-- pytest, pytest-asyncio (for Python tests)
-
-### Build
+### Setup
 
 ```bash
-npm install
-npm run build      # bundles frontend to dist/
+npm install                 # frontend dependencies
+npm run build               # bundle frontend to dist/
+npm run package             # build + zip into ed-journal-monitor.zip
 ```
 
-### Package
+Python 3.9+ is required for the backend, which uses the standard library only - no pip packages at runtime.
+
+### Before you open a PR
 
 ```bash
-npm run package      # builds + zips plugin files into ed-journal-monitor.zip
-```
-
-### Test
-
-```bash
-PYTHONPATH=. .venv/bin/python -m pytest tests/ -v
-# or: npm run test
-```
-
-### Lint / Typecheck
-
-```bash
+npm run test                # pytest (or: PYTHONPATH=. .venv/bin/python -m pytest tests/ -v)
 npm run lint:ts
 npm run lint:py
 ```
 
+All tests must pass. Tests are expected alongside the change, not after it.
+
+### Workflow
+
+- Work on a dedicated branch or worktree - never commit directly to `main`.
+- Integrate via pull request, merged with **squash and rebase** to keep history linear.
+- Add an entry under `[Unreleased]` in `CHANGELOG.md`. Keep it to one or two user-facing sentences; these become the release notes.
+- Changes touching event transformation, validation, filtering, or submission must follow the [EDDN Developers Guide](https://github.com/EDCD/EDDN/blob/live/docs/Developers.md) and the relevant [schema README](https://github.com/EDCD/EDDN/tree/live/schemas).
+
 ## License
 
-MIT
+[MIT](LICENSE)

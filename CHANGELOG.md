@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Release packaging checks are now covered by automated tests, so a weakened check can't silently slip through.
+- Rewrote the README around what the plugin does for you and how to get started, moving EDDN schema reference into the developer guide and adding contributor setup instructions.
 
 ## [0.8.0] - 2026-08-12
 
