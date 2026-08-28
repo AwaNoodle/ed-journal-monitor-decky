@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (813 tests, all passing)
+- Tests: pytest + pytest-asyncio (817 tests, all passing)
 - Known on-device issue: Decky Loader's PyInstaller-embedded Python 3.11 can't find system SSL certs; submitter uses `_build_ssl_context()` with explicit CA bundle cascade (env → certifi → system paths)
 
 ## Architecture
@@ -57,6 +57,7 @@ Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm":
 - After implementing any change, update `README.md` if user-facing behavior, features, or supported events have changed
 - After implementing any change, add an entry under `[Unreleased]` in `CHANGELOG.md`. Keep entries **short** — 1–2 sentences: what changed and, if it isn't obvious, why. These become the GitHub Release notes, so they are for users, not implementers. No internal mechanics (module names, event payload fields, callable names, caching/threading details, rationale for rejected alternatives) — that belongs in AGENTS.md and the OpenSpec archive
 - Releases are version-bump → release PR → tag on `main` → automated publish. **Follow the `releasing` skill (`.claude/skills/releasing/SKILL.md`) for the actual procedure** — do not improvise from these notes. `.github/workflows/release.yml` enforces the invariants that matter (the tagged commit is on `main`, the tag matches `package.json`, the `CHANGELOG.md` section for the version exists, the zip contains the expected files at the expected version) and fails the run rather than publishing something wrong — but it fails *after* the tag exists, so getting it right first time still matters. The guard bodies live in tested `scripts/verify-*.sh` scripts rather than inline in the YAML, so their mutation cases (e.g. a stripped backend that still passes a weak check) run on every PR via pytest instead of relying on one-off manual verification
+- The release zip must contain **no compiled Python** (`__pycache__` / `.pyc`). CI runs pytest before `npm run package`, so the backend's `__pycache__` exists by the time the copy step runs; `package` now prunes it after the copy *and* excludes it at `zip` time, and `verify-package-contents.sh` fails the release if any such entry survives. This is the only class of packaging defect that is invisible on-device (Decky's embedded Python 3.11 ignores cpython-39 bytecode and recompiles), so the guard is the only thing that can catch it
 
 ## Feature Workflow
 - All feature work **MUST** be done on a dedicated branch or git worktree — never commit feature work directly to `main`

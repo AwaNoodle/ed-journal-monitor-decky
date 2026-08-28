@@ -205,3 +205,63 @@ def test_missing_tag_arg_is_a_usage_error(valid_zip):
     )
     assert result.returncode == 2
     assert "usage" in result.stderr
+
+
+def test_compiled_bytecode_file_fails(tmp_path):
+    """A .pyc anywhere in the zip must be rejected. CI runs pytest before
+    packaging, which populates src/modules/__pycache__; the copy step used
+    to sweep that into the release zip, shipping stale bytecode built for
+    the wrong Python version and roughly doubling the download size."""
+    zip_path = make_zip(
+        tmp_path / "release.zip",
+        extra_files={
+            "ed-journal-monitor/bin/src/modules/__pycache__/watcher.cpython-39.pyc": "\x00\x00",
+        },
+    )
+
+    result = run(zip_path, "v1.2.3")
+    assert result.returncode == 1
+    assert "::error::" in result.stdout
+    assert "compiled python" in result.stdout.lower()
+
+
+def test_pycache_directory_entry_alone_fails(tmp_path):
+    """The bare __pycache__ directory entry, with no .pyc inside it, must
+    also fail: a check that only looked for '*.pyc' would pass this zip and
+    still ship a stray directory the plugin never needs."""
+    zip_path = make_zip(
+        tmp_path / "release.zip",
+        extra_files={"ed-journal-monitor/bin/src/modules/__pycache__/": ""},
+    )
+
+    result = run(zip_path, "v1.2.3")
+    assert result.returncode == 1
+    assert "::error::" in result.stdout
+    assert "compiled python" in result.stdout.lower()
+
+
+def test_pyc_outside_the_modules_directory_fails(tmp_path):
+    """The check is not scoped to bin/src/modules/ - bytecode alongside
+    main.py at the plugin root is just as unwanted, so a check anchored to
+    the modules path would be a silent gap."""
+    zip_path = make_zip(
+        tmp_path / "release.zip",
+        extra_files={"ed-journal-monitor/__pycache__/main.cpython-39.pyc": "\x00\x00"},
+    )
+
+    result = run(zip_path, "v1.2.3")
+    assert result.returncode == 1
+    assert "compiled python" in result.stdout.lower()
+
+
+def test_filename_merely_containing_pyc_is_not_rejected(tmp_path):
+    """Guards the .pyc check against an over-broad substring match: a real
+    module whose name happens to contain 'pyc' is legitimate and must not
+    abort a good release."""
+    zip_path = make_zip(
+        tmp_path / "release.zip",
+        extra_files={"ed-journal-monitor/bin/src/modules/pycache_helper.py": "# ok\n"},
+    )
+
+    result = run(zip_path, "v1.2.3")
+    assert result.returncode == 0, result.stdout + result.stderr

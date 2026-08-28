@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Release downloads no longer include leftover compiled Python files, roughly halving the plugin's download size.
+
 ## [0.8.1] - 2026-08-28
 
 ### Fixed
