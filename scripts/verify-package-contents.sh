@@ -55,6 +55,24 @@ printf '%s\n' "$listing" | grep -Eq '^ed-journal-monitor/bin/src/modules/.+\.py$
 printf '%s\n' "$listing" | grep -Fxq 'ed-journal-monitor/bin/src/modules/watcher.py' || {
   echo "::error::ed-journal-monitor/bin/src/modules/watcher.py missing from $ZIP"; exit 1; }
 
+# No compiled Python may ship. CI runs pytest before packaging, so
+# src/modules/__pycache__ exists by the time the copy step runs; v0.8.1 was
+# published with 25 stale cpython-39 .pyc files, roughly doubling the zip.
+# The device's embedded Python 3.11 ignores them, so this is invisible at
+# runtime and only a guard here can catch it. Anchored on a path segment
+# (not a substring) so a legitimate module whose name merely contains
+# "pyc" is not rejected, and matching the bare __pycache__ directory entry
+# as well as the .pyc files - a check for only one of the two would pass a
+# zip still carrying the other.
+bytecode=$(printf '%s\n' "$listing" | grep -E '(^|/)__pycache__(/|$)|\.pyc$' || true)
+if [ -n "$bytecode" ]; then
+  count=$(printf '%s\n' "$bytecode" | wc -l | tr -d ' ')
+  # Annotations are one line, and a full __pycache__ sweep is ~27 paths, so
+  # report the count with a sample rather than an unreadable wall of paths.
+  echo "::error::compiled python bytecode in $ZIP ($count entries), e.g. $(printf '%s\n' "$bytecode" | head -3 | tr '\n' ' ')"
+  exit 1
+fi
+
 zipped=$(unzip -p "$ZIP" ed-journal-monitor/package.json | jq -r .version)
 if [ "v$zipped" != "$TAG" ]; then
   echo "::error::bundled package.json is $zipped, expected ${TAG#v}"
