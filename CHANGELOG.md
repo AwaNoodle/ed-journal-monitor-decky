@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the GitHub Actions used by CI so they no longer run on the deprecated Node.js 20 runtime.
+
 ## [0.8.1] - 2026-08-28
 
 ### Fixed
