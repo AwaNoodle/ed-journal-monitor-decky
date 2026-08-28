@@ -1665,6 +1665,61 @@ class TestTransformCommodity:
             "statusFlags": ["powerplay"],
         }
 
+    def test_transform_commodity_deduplicates_status_flags(self, validator):
+        """EDDN commodity/3 declares uniqueItems on each commodity's statusFlags."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "MeanPrice": 47113,
+                    "SellPrice": 48632,
+                    "Demand": 166200,
+                    "DemandBracket": 3,
+                    "StatusFlags": ["powerplay", "producer", "powerplay"],
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["commodities"][0]["statusFlags"] == ["powerplay", "producer"]
+
+    def test_transform_commodity_survives_unhashable_status_flags(self, validator):
+        """A malformed StatusFlags entry must not crash the transform.
+
+        Deduping uses a set, so a non-hashable entry would raise where the
+        old pass-through could not.  A journal this malformed will be
+        rejected by EDDN on its own merits; losing the rest of the batch to
+        a TypeError would be worse.
+        """
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "SellPrice": 48632,
+                    "DemandBracket": 3,
+                    "StatusFlags": ["powerplay", {"unexpected": "object"}, "powerplay"],
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["commodities"][0]["statusFlags"] == [
+            "powerplay",
+            {"unexpected": "object"},
+        ]
+
     def test_transform_commodity_empty_returns_none(self, validator):
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
@@ -1814,6 +1869,51 @@ class TestTransformOutfitting:
         assert payload["horizons"] is False
         assert payload["odyssey"] is True
 
+    def test_transform_outfitting_deduplicates_module_names(self, validator):
+        """EDDN outfitting/2 declares uniqueItems on `modules`.
+
+        Elite lists the same module under several `id`s when it is purchasable
+        with both credits and Powerplay merc coins.  Those entries differ only
+        in fields EDDN does not carry, so they collapse into duplicate names.
+        """
+        outfitting_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {"id": 128049489, "Name": "hpt_railgun_fixed_medium", "BuyPrice": 402480},
+                {"id": 128666724, "Name": "int_cargo_rack_size6_class1", "BuyPrice": 1000},
+                {"id": 129044375, "Name": "hpt_railgun_fixed_medium", "BuyMercCoinsPrice": 950},
+            ],
+        }
+
+        message = validator.transform_outfitting(outfitting_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["modules"] == [
+            "hpt_railgun_fixed_medium",
+            "int_cargo_rack_size6_class1",
+        ]
+
+    def test_transform_outfitting_deduplicates_after_name_sanitisation(self, validator):
+        """Two raw names that sanitise to the same EDDN name are one module."""
+        outfitting_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {"Name": "$hpt_railgun_fixed_medium_name;"},
+                {"Name": "hpt_railgun_fixed_medium"},
+            ],
+        }
+
+        message = validator.transform_outfitting(outfitting_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["modules"] == ["hpt_railgun_fixed_medium"]
+
     def test_transform_outfitting_empty_returns_none(self, validator):
         outfitting_data = {
             "timestamp": "2026-01-12T13:05:00Z",
@@ -1860,6 +1960,25 @@ class TestTransformShipyard:
         assert payload["ships"] == ["sidewinder", "eagle"]
         assert payload["horizons"] is True
         assert payload["odyssey"] is True
+
+    def test_transform_shipyard_deduplicates_ship_types(self, validator):
+        """EDDN shipyard/2 declares uniqueItems on `ships`."""
+        shipyard_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "PriceList": [
+                {"id": 128049249, "ShipType": "sidewinder", "ShipPrice": 32000},
+                {"id": 128049255, "ShipType": "eagle", "ShipPrice": 44800},
+                {"id": 128672138, "ShipType": "sidewinder", "ShipPrice": 32000},
+            ],
+        }
+
+        message = validator.transform_shipyard(shipyard_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["ships"] == ["sidewinder", "eagle"]
 
     def test_transform_shipyard_empty_returns_none(self, validator):
         shipyard_data = {

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Station outfitting uploads no longer contain duplicate module entries, which EDDN was accepting but flagging as warnings. Elite lists some modules twice when they can be bought with either credits or Powerplay merc coins.
+
 ### Changed
 
 - Release packaging checks are now covered by automated tests, so a weakened check can't silently slip through.

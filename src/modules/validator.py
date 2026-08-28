@@ -102,6 +102,33 @@ def _sanitize_eddn_name(name: str) -> str:
     return name
 
 
+def _dedupe_preserving_order(names: list) -> list:
+    """Drop repeated entries from a list, keeping first-seen order.
+
+    Several EDDN schemas declare ``uniqueItems`` on their name arrays
+    (outfitting/2 ``modules``, shipyard/2 ``ships``, commodity/3
+    ``statusFlags``).  The journal can legitimately repeat a name -- Elite
+    lists a module once per purchase currency, for example -- and those
+    entries are indistinguishable once reduced to the name EDDN carries.
+    Sending the duplicates makes the gateway accept the message but flag it
+    as a warning, so collapse them here.
+    """
+    seen: set = set()
+    unique: list = []
+    for name in names:
+        try:
+            if name in seen:
+                continue
+            seen.add(name)
+        except TypeError:
+            # Non-hashable entry from a malformed journal. EDDN will reject
+            # it on its own merits; crashing here would drop the whole batch.
+            if name in unique:
+                continue
+        unique.append(name)
+    return unique
+
+
 def _as_dict_list(value: object) -> list[dict]:
     """Normalize a JSON value into a list of dictionaries."""
     if not isinstance(value, list):
@@ -467,7 +494,7 @@ class EDDNValidator:
             # Include statusFlags if present (e.g. ["powerplay"])
             status_flags = item.get("StatusFlags")
             if status_flags and isinstance(status_flags, list):
-                commodity["statusFlags"] = status_flags
+                commodity["statusFlags"] = _dedupe_preserving_order(status_flags)
 
             commodities.append(commodity)
 
@@ -508,6 +535,8 @@ class EDDNValidator:
                 continue
             modules.append(_sanitize_eddn_name(name))
 
+        modules = _dedupe_preserving_order(modules)
+
         if not modules:
             return None
 
@@ -544,6 +573,8 @@ class EDDNValidator:
             if not ship_type or not isinstance(ship_type, str):
                 continue
             ships.append(_sanitize_eddn_name(ship_type))
+
+        ships = _dedupe_preserving_order(ships)
 
         if not ships:
             return None

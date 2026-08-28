@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (735 tests, all passing)
+- Tests: pytest + pytest-asyncio (813 tests, all passing)
 - Known on-device issue: Decky Loader's PyInstaller-embedded Python 3.11 can't find system SSL certs; submitter uses `_build_ssl_context()` with explicit CA bundle cascade (env → certifi → system paths)
 
 ## Architecture
@@ -70,6 +70,7 @@ Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm":
 - All changes **MUST** follow the guidelines in the [EDDN Developers Guide](https://github.com/EDCD/EDDN/blob/live/docs/Developers.md)
 - All schema handling **MUST** match the requirements documented in each schema's README file in the [EDDN live schemas folder](https://github.com/EDCD/EDDN/blob/live/schemas)
 - When modifying any event transformation, validation, filtering, or submission logic, cross-reference the relevant schema README before implementing
+- **`uniqueItems` arrays must be deduped before submit.** Three schemas declare it: outfitting/2 `modules`, shipyard/2 `ships`, commodity/3 `statusFlags` (and `prohibited`, which we don't emit). A duplicate does **not** fail the upload — the gateway returns an ordinary `200 OK` and silently tallies a *warning*, visible only as an aggregate count on the [EDDN monitor](https://eddn.edcd.io/). Nothing comes back to the client, so this class of defect is invisible in the plugin's own activity log and must be prevented at transform time via `_dedupe_preserving_order()` in `validator.py`. The real-world trigger: Elite lists a module once per purchase currency (credits vs Powerplay merc coins), so entries differing only in `id`/`BuyMercCoinsPrice` collapse to duplicate names once reduced to what EDDN carries
 
 ## Key Files
 - `scripts/` — Standalone bash scripts extracted from CI workflows so their logic is unit-testable (`extract-release-notes.sh`, `verify-package-contents.sh`, `verify-tag-version.sh`, `verify-tag-on-main.sh`), each with a matching `tests/test_*.py`
