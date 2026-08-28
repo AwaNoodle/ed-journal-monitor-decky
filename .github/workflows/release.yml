@@ -27,7 +27,7 @@ jobs:
       # fetch-depth: 0 so the ancestry check below has real history to walk.
       # A shallow clone can report a wrong answer when the merge base lies
       # beyond the fetched depth.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -38,12 +38,12 @@ jobs:
       - name: Verify tag is on main
         run: bash scripts/verify-tag-on-main.sh "$GITHUB_SHA" "$TAG"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.9'
 

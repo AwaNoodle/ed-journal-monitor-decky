@@ -30,8 +30,14 @@ push is automated by `.github/workflows/release.yml`.
 - `main` is pulled and the working tree is clean.
 - `npm run lint:ts` and `npm run lint:py` both pass locally (`lint:py` also runs the full pytest
   suite). CI re-runs these on the tag, so a failure here becomes a failed release, not a caught one.
-- `CHANGELOG.md`'s `[Unreleased]` section has an entry for each change in the release. If it's
-  empty or thin, the GitHub Release notes will be too - the workflow copies that section verbatim.
+- `CHANGELOG.md`'s `[Unreleased]` section has an entry for each *user-facing* change in the
+  release. If it's empty or thin, the GitHub Release notes will be too - the workflow copies
+  that section verbatim. Changes users can't observe (CI, dev dependencies, tests, refactors,
+  docs) deliberately have no entry - see AGENTS.md. If a release turns out to contain *only*
+  such changes, don't pad the section with internals: either fold the work into a release that
+  has user-facing content, or write the one honest user-facing line the release does justify
+  (e.g. "Maintenance release - no functional changes."), since CI requires the version's
+  changelog section to exist and be non-empty.
 - Five things are now enforced by CI rather than by care, and fail the release
   run loudly: the tagged commit must be on `main`, the tag must match
   `package.json`, the `## [<version>]` changelog section must exist and be
