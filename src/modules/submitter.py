@@ -10,7 +10,6 @@ import json
 import random
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import decky
@@ -31,7 +30,10 @@ _build_ssl_context = build_ssl_context
 EDDN_URL = "https://eddn.edcd.io:4430/upload/"
 DEFAULT_TIMEOUT = 10  # seconds
 MAX_RETRIES = 3
-INITIAL_RETRY_DELAY = 5  # seconds
+# docs/Developers.md: "You MUST wait some reasonable time (minimum 1 minute)
+# before retrying any failed message."
+INITIAL_RETRY_DELAY = 60  # seconds
+MAX_RETRY_DELAY = 300  # seconds
 HTTP_OK = 200
 HTTP_RATE_LIMITED = 429
 HTTP_CLIENT_ERROR_MIN = 400
@@ -66,18 +68,18 @@ class EDDNSubmitter:
             game_version: Game version string from Fileheader event (e.g. "4.1.0.404").
             game_build: Game build string from Fileheader event (e.g. "r280105/r0 ").
         """
-        # Populate header
-        header = {
+        # Populate header. Per docs/Developers.md: if a data-source value can't
+        # be determined, the field MUST still be sent with an empty string
+        # (gameversion/gamebuild) rather than omitted. gatewayTimestamp is not
+        # sent -- every schema says it "will be overwritten by the gateway;
+        # submitters are not intended to populate this property."
+        message["header"] = {
             "uploaderID": self.settings.get("uploader_id", ""),
             "softwareName": constants.SOFTWARE_NAME,
             "softwareVersion": self.settings.get("software_version", constants.SOFTWARE_VERSION),
-            "gatewayTimestamp": datetime.now(timezone.utc).isoformat(),
+            "gameversion": game_version,
+            "gamebuild": game_build,
         }
-        if game_version:
-            header["gameversion"] = game_version
-        if game_build:
-            header["gamebuild"] = game_build
-        message["header"] = header
 
         self._last_error_message = None
         self._last_http_status = None
@@ -210,7 +212,7 @@ class EDDNSubmitter:
         """Calculate exponential backoff delay with jitter."""
         delay = INITIAL_RETRY_DELAY * (2**attempt)
         jitter = random.uniform(0, 1)
-        return min(delay + jitter, 60.0)
+        return min(delay + jitter, MAX_RETRY_DELAY)
 
     def get_stats(self) -> dict:
         """Return current upload statistics."""

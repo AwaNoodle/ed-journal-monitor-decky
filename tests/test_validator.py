@@ -746,6 +746,25 @@ class TestTransform:
         assert message["message"]["horizons"] is True
         assert message["message"]["odyssey"] is False
 
+    def test_omits_horizons_odyssey_when_unknown(self, validator):
+        """No LoadGame observed yet: EDDN requires omitting the keys, never guessing."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T12:05:30Z",
+                "event": "FSDJump",
+                "StarSystem": "Sol",
+                "SystemAddress": 10477373803,
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="FSDJump",
+            timestamp="2026-01-12T12:05:30Z",
+        )
+        session_state = SessionState()
+        message = validator.transform(event, session_state)
+
+        assert "horizons" not in message["message"]
+        assert "odyssey" not in message["message"]
+
     def test_message_structure(self, validator):
         event = ParsedEvent(
             raw={
@@ -1896,6 +1915,42 @@ class TestTransformOutfitting:
             "int_cargo_rack_size6_class1",
         ]
 
+    def test_transform_outfitting_elides_planet_approach_suite(self, validator):
+        """EDDN outfitting-README Elisions: Int_PlanetApproachSuite must be
+        removed 'for historical reasons'. Match EDMC: exact, case-insensitive
+        match on the sanitised module name — the _advanced variant is kept.
+        """
+        outfitting_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {"Name": "Int_PlanetApproachSuite"},
+                {"Name": "int_planetapproachsuite_advanced"},
+                {"Name": "int_cargo_rack_size6_class1"},
+            ],
+        }
+
+        message = validator.transform_outfitting(outfitting_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["modules"] == [
+            "int_planetapproachsuite_advanced",
+            "int_cargo_rack_size6_class1",
+        ]
+
+    def test_transform_outfitting_elided_module_only_returns_none(self, validator):
+        outfitting_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [{"Name": "int_planetapproachsuite"}],
+        }
+
+        assert validator.transform_outfitting(outfitting_data, SessionState()) is None
+
     def test_transform_outfitting_deduplicates_after_name_sanitisation(self, validator):
         """Two raw names that sanitise to the same EDDN name are one module."""
         outfitting_data = {
@@ -1948,7 +2003,7 @@ class TestTransformShipyard:
     def test_transform_shipyard_data(self, validator, load_fixture):
         shipyard_data = load_fixture("Shipyard.json")
 
-        message = validator.transform_shipyard(shipyard_data, SessionState())
+        message = validator.transform_shipyard(shipyard_data, SessionState(horizons=True, odyssey=True))
 
         assert message is not None
         assert message["$schemaRef"] == EDDN_SHIPYARD_2_SCHEMA_REF

@@ -129,6 +129,19 @@ def _dedupe_preserving_order(names: list) -> list:
     return unique
 
 
+def _set_horizons_odyssey(message_payload: dict, session_state: SessionState) -> None:
+    """Set horizons/odyssey on a message payload, but only when known.
+
+    EDDN's docs/Developers.md is explicit: if a value cannot be determined,
+    omit the key entirely -- never guess, and never send null or false as a
+    stand-in for "unknown".
+    """
+    if session_state.horizons is not None:
+        message_payload["horizons"] = session_state.horizons
+    if session_state.odyssey is not None:
+        message_payload["odyssey"] = session_state.odyssey
+
+
 def _as_dict_list(value: object) -> list[dict]:
     """Normalize a JSON value into a list of dictionaries."""
     if not isinstance(value, list):
@@ -227,8 +240,7 @@ class EDDNValidator:
                     message_payload["StarSystem"] = session_state.star_system
 
         # Augment with horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_JOURNAL_1_SCHEMA_REF,
@@ -271,9 +283,8 @@ class EDDNValidator:
             "StarPos": star_pos,
             "SystemAddress": system_address,
             "signals": cleaned_signals,
-            "horizons": session_state.horizons,
-            "odyssey": session_state.odyssey,
         }
+        _set_horizons_odyssey(payload, session_state)
 
         return {
             "$schemaRef": EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
@@ -310,8 +321,7 @@ class EDDNValidator:
                 message_payload["SystemName"] = session_state.star_system
 
         # Add horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
@@ -361,8 +371,7 @@ class EDDNValidator:
         message_payload.pop("SystemAddress", None)
 
         # Add horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_NAVROUTE_1_SCHEMA_REF,
@@ -405,8 +414,7 @@ class EDDNValidator:
                 message_payload["StarSystem"] = session_state.star_system
 
         # Add horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
@@ -440,8 +448,7 @@ class EDDNValidator:
                 message_payload["StarSystem"] = session_state.star_system
 
         # Add horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_CODEXENTRY_1_SCHEMA_REF,
@@ -501,18 +508,19 @@ class EDDNValidator:
         if not commodities:
             return None
 
+        message_payload = {
+            "timestamp": timestamp,
+            "systemName": system_name,
+            "stationName": station_name,
+            "marketId": market_id,
+            "commodities": commodities,
+        }
+        _set_horizons_odyssey(message_payload, session_state)
+
         return {
             "$schemaRef": EDDN_COMMODITY_3_SCHEMA_REF,
             "header": {},
-            "message": {
-                "timestamp": timestamp,
-                "systemName": system_name,
-                "stationName": station_name,
-                "marketId": market_id,
-                "commodities": commodities,
-                "horizons": session_state.horizons,
-                "odyssey": session_state.odyssey,
-            },
+            "message": message_payload,
         }
 
     def transform_outfitting(self, outfitting_data: dict, session_state: SessionState) -> dict | None:
@@ -533,25 +541,33 @@ class EDDNValidator:
             name = module.get("Name")
             if not name or not isinstance(name, str):
                 continue
-            modules.append(_sanitize_eddn_name(name))
+            sanitised = _sanitize_eddn_name(name)
+            # EDDN outfitting-README Elisions: "The Int_PlanetApproachSuite
+            # module (for historical reasons)" must be removed. Match EDMC's
+            # exact, case-insensitive check on the base module name -- the
+            # _advanced variant is not named in the README and is kept.
+            if sanitised.lower() == "int_planetapproachsuite":
+                continue
+            modules.append(sanitised)
 
         modules = _dedupe_preserving_order(modules)
 
         if not modules:
             return None
 
+        message_payload = {
+            "timestamp": timestamp,
+            "systemName": system_name,
+            "stationName": station_name,
+            "marketId": market_id,
+            "modules": modules,
+        }
+        _set_horizons_odyssey(message_payload, session_state)
+
         return {
             "$schemaRef": EDDN_OUTFITTING_2_SCHEMA_REF,
             "header": {},
-            "message": {
-                "timestamp": timestamp,
-                "systemName": system_name,
-                "stationName": station_name,
-                "marketId": market_id,
-                "modules": modules,
-                "horizons": session_state.horizons,
-                "odyssey": session_state.odyssey,
-            },
+            "message": message_payload,
         }
 
     def transform_shipyard(self, shipyard_data: dict, session_state: SessionState) -> dict | None:
@@ -579,18 +595,19 @@ class EDDNValidator:
         if not ships:
             return None
 
+        message_payload = {
+            "timestamp": timestamp,
+            "systemName": system_name,
+            "stationName": station_name,
+            "marketId": market_id,
+            "ships": ships,
+        }
+        _set_horizons_odyssey(message_payload, session_state)
+
         return {
             "$schemaRef": EDDN_SHIPYARD_2_SCHEMA_REF,
             "header": {},
-            "message": {
-                "timestamp": timestamp,
-                "systemName": system_name,
-                "stationName": station_name,
-                "marketId": market_id,
-                "ships": ships,
-                "horizons": session_state.horizons,
-                "odyssey": session_state.odyssey,
-            },
+            "message": message_payload,
         }
 
     def transform_navbeacon_scan(self, event: ParsedEvent, session_state: SessionState) -> dict:
@@ -619,8 +636,7 @@ class EDDNValidator:
                 message_payload["StarSystem"] = session_state.star_system
 
         # Add horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
@@ -657,8 +673,7 @@ class EDDNValidator:
                 message_payload["SystemName"] = session_state.star_system
 
         # Add horizons/odyssey
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
@@ -693,8 +708,7 @@ class EDDNValidator:
         if "StarPos" not in message_payload:
             return None
 
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
@@ -730,8 +744,7 @@ class EDDNValidator:
         if "StarPos" not in message_payload or not message_payload.get("StarSystem"):
             return None
 
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_FSSBODYSIGNALS_1_SCHEMA_REF,
@@ -753,8 +766,7 @@ class EDDNValidator:
         for field in JOURNAL_1_ONLY_DISALLOWED:
             message_payload.pop(field, None)
 
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_DOCKINGGRANTED_1_SCHEMA_REF,
@@ -777,8 +789,7 @@ class EDDNValidator:
         for field in JOURNAL_1_ONLY_DISALLOWED:
             message_payload.pop(field, None)
 
-        message_payload["horizons"] = session_state.horizons
-        message_payload["odyssey"] = session_state.odyssey
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_DOCKINGDENIED_1_SCHEMA_REF,
@@ -820,9 +831,8 @@ class EDDNValidator:
             "CarrierName": carrier_name,
             "CarrierID": carrier_id,
             "Items": cleaned_items,
-            "horizons": session_state.horizons,
-            "odyssey": session_state.odyssey,
         }
+        _set_horizons_odyssey(message_payload, session_state)
 
         return {
             "$schemaRef": EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
