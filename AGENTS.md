@@ -6,7 +6,7 @@ Decky plugin that monitors Elite Dangerous journal files and submits events to E
 - Frontend: TypeScript, React, @decky/api, @decky/ui (Decky plugin framework)
 - Backend: Python 3.9+ (asyncio, stdlib only - no pip packages)
 - Build: Rollup + TypeScript for frontend; Python directly for backend
-- Tests: pytest + pytest-asyncio (817 tests, all passing)
+- Tests: pytest + pytest-asyncio (824 tests, all passing)
 - Known on-device issue: Decky Loader's PyInstaller-embedded Python 3.11 can't find system SSL certs; submitter uses `_build_ssl_context()` with explicit CA bundle cascade (env → certifi → system paths)
 
 ## Architecture
@@ -73,6 +73,10 @@ Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm":
 - All schema handling **MUST** match the requirements documented in each schema's README file in the [EDDN live schemas folder](https://github.com/EDCD/EDDN/blob/live/schemas)
 - When modifying any event transformation, validation, filtering, or submission logic, cross-reference the relevant schema README before implementing
 - **`uniqueItems` arrays must be deduped before submit.** Three schemas declare it: outfitting/2 `modules`, shipyard/2 `ships`, commodity/3 `statusFlags` (and `prohibited`, which we don't emit). A duplicate does **not** fail the upload — the gateway returns an ordinary `200 OK` and silently tallies a *warning*, visible only as an aggregate count on the [EDDN monitor](https://eddn.edcd.io/). Nothing comes back to the client, so this class of defect is invisible in the plugin's own activity log and must be prevented at transform time via `_dedupe_preserving_order()` in `validator.py`. The real-world trigger: Elite lists a module once per purchase currency (credits vs Powerplay merc coins), so entries differing only in `id`/`BuyMercCoinsPrice` collapse to duplicate names once reduced to what EDDN carries
+- **`horizons`/`odyssey` are tri-state, never guessed.** `SessionState.horizons`/`.odyssey` (`parser.py`) default to `None` (unknown) and are only set from the `LoadGame` event's `Horizons`/`Odyssey` keys when those keys are actually present (a pre-4.0 `LoadGame` may omit `Odyssey` entirely). Every `EDDNValidator` transform writes the `horizons`/`odyssey` message keys only when the corresponding session-state value is not `None`, via the shared `_set_horizons_odyssey()` helper in `validator.py` — per docs/Developers.md, a value the plugin hasn't actually observed must be omitted, never sent as a guessed `true` or a `false` placeholder
+- **outfitting/2 elides `Int_PlanetApproachSuite`.** Per the outfitting-README's Elisions section, `transform_outfitting()` drops any module whose sanitised name case-insensitively equals `int_planetapproachsuite` (matching EDMC's exact filter); the `_advanced` variant is not named in the README and is kept
+- **EDDN header fields.** `submitter.py`'s `submit()` always sets `gameversion`/`gamebuild` on the header, defaulting to `""` when unknown (docs/Developers.md requires the field be present even when empty) and never sets `gatewayTimestamp` (every schema says the gateway overwrites it; submitters must not populate it)
+- **Retry interval.** `INITIAL_RETRY_DELAY` in `submitter.py` is 60s (docs/Developers.md: minimum 1 minute before retrying a failed message), backing off exponentially up to `MAX_RETRY_DELAY` (300s) with jitter. A `stop()`-triggered cancellation of the watcher's poll task interrupts an in-flight retry sleep immediately (`asyncio.Task.cancel()` raises inside `asyncio.sleep()`), so the longer cap does not risk a slow shutdown
 - **`schema-versions.md`** records what was last checked against upstream EDDN and EDSM (pinned commit, per-schema dates, known deviations, EDSM's per-endpoint contract). Read it before changing transform/validation/submission logic; re-run the check with the `checking-schema-updates` skill and update it afterwards
 
 ## Key Files

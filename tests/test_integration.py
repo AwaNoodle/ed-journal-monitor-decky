@@ -68,16 +68,22 @@ class TestEndToEndPipeline:
         assert EDDN_JOURNAL_1_SCHEMA_REF in schema_refs
         assert EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF in schema_refs
 
-        # Verify LoadGame was captured for session state
-        assert parser.session_state.horizons is not None
+        # Verify LoadGame was captured for session state. This fixture's LoadGame
+        # has no Horizons/Odyssey keys (a 3.8-era shape), so those stay unknown
+        # (None) rather than being guessed -- see TestSessionState in
+        # test_parser.py and test_omits_horizons_odyssey_when_unknown in
+        # test_validator.py for the dedicated coverage.
+        assert parser.session_state.commander == "TestCommander"
+        assert parser.session_state.horizons is None
+        assert parser.session_state.odyssey is None
 
         # Verify message structure
         for msg in reportable_events:
             assert "$schemaRef" in msg
             assert "header" in msg
             assert "message" in msg
-            assert "horizons" in msg["message"]
-            assert "odyssey" in msg["message"]
+            assert "horizons" not in msg["message"]
+            assert "odyssey" not in msg["message"]
 
     @pytest.mark.asyncio
     async def test_market_auxiliary_pipeline(self, tmp_path, copy_fixture):

@@ -55,19 +55,20 @@ Each is filed as a GitHub issue; fix or re-accept there, not by editing this row
 | #28 | fsssignaldiscovered: batch `timestamp` uses the *last* signal's, not the first's, contra the README/schema |
 | #29 | commodity: the `NonMarketable` category filter (`validator.py`) matches a category string pattern (`nonde`) not seen in any real journal category (`$MARKET_category_<name>;`); likely dead code, unverified against a real `Market.json` |
 
-### In flight, not yet merged
+### Fixed since the 2026-08-29 audit
 
-Branch `fix/eddn-compliance-1-4` has commits addressing several gaps below. As of this audit
-`git log origin/main` does **not** include them - do not treat these as fixed until that branch
-merges:
+Branch `fix/eddn-compliance-1-4` merged to `main` as #30 (commit `ad7869f`, 2026-08-31), closing
+the gaps below - no longer deviations:
 
-- outfitting/2: `Int_PlanetApproachSuite` (and `_advanced`) not elided per
-  `outfitting-README.md`'s Elisions section
-- `horizons`/`odyssey` sent as a guessed boolean instead of omitted when unknown
-- `gameversion`/`gamebuild` dropped when empty instead of always sent as `""`
-- sender-set `gatewayTimestamp` not dropped before submission (harmless - gateway overwrites it -
-  but non-conformant)
-- retry backoff starts below the documented 1-minute minimum (`INITIAL_RETRY_DELAY = 5`)
+- outfitting/2: `Int_PlanetApproachSuite` is now elided per `outfitting-README.md`'s Elisions
+  section (base name, case-insensitive; `_advanced` is kept, matching EDMC)
+- `horizons`/`odyssey` are now tri-state (`bool | None`) and omitted from the message entirely
+  when unknown, instead of defaulting to a guessed `True`
+- `gameversion`/`gamebuild` are now always sent, defaulting to `""` when unknown
+- sender-set `gatewayTimestamp` is no longer sent (the gateway overwrites it regardless, but the
+  plugin no longer populates it)
+- retry backoff now starts at 60s (`INITIAL_RETRY_DELAY`), meeting the documented 1-minute
+  minimum, with the cap raised to 300s
 
 ## EDSM
 

@@ -158,9 +158,19 @@ class TestSessionState:
         assert parser.session_state.odyssey is False
 
     def test_default_session_state(self, parser):
-        """Default state assumes horizons and odyssey are true."""
+        """Before any LoadGame is observed, horizons/odyssey are unknown (None), not guessed."""
+        assert parser.session_state.horizons is None
+        assert parser.session_state.odyssey is None
+
+    def test_loadgame_without_odyssey_key_leaves_odyssey_unknown(self, parser):
+        """A 3.8-era LoadGame has no Odyssey key; EDDN says omit rather than guess."""
+        line = (
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame",'
+            '"Commander":"TestCmdr","Horizons":true}'
+        )
+        parser.parse_line(line)
         assert parser.session_state.horizons is True
-        assert parser.session_state.odyssey is True
+        assert parser.session_state.odyssey is None
 
 
 class TestParseAuxiliaryFile:

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Station outfitting uploads no longer include the Int_PlanetApproachSuite module, which EDDN's schema requires omitting.
+- The Horizons/Odyssey flags on uploaded events now reflect only what the game has actually reported, instead of assuming both are owned before that's been confirmed.
+
+### Changed
+
+- Failed EDDN uploads now wait at least a minute before retrying (previously as little as 5 seconds), in line with EDDN's guidance.
+
 ## [0.8.2] - 2026-08-28
 
 ### Fixed
