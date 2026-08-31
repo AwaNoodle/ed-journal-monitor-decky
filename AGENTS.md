@@ -68,7 +68,7 @@ Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm":
 ## Reporting
 - All report and review output (code reviews, diagnostics, analysis, etc.) must be written to the `./reports/` folder
 
-## EDDN Compliance
+## EDDN/EDSM Compliance
 - All changes **MUST** follow the guidelines in the [EDDN Developers Guide](https://github.com/EDCD/EDDN/blob/live/docs/Developers.md)
 - All schema handling **MUST** match the requirements documented in each schema's README file in the [EDDN live schemas folder](https://github.com/EDCD/EDDN/blob/live/schemas)
 - When modifying any event transformation, validation, filtering, or submission logic, cross-reference the relevant schema README before implementing

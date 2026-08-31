@@ -17,7 +17,7 @@ per-endpoint contract); this skill is the mechanics for regenerating it.
 | What changed since last audit | `git log --oneline <recorded-commit>..HEAD -- schemas/` |
 | Per-schema last-modified date | `git log -1 --date=short --pretty='%ad %h' -- schemas/<file>` |
 | Dump message-level field constraints | `python3 dump_schema_fields.py <clone>/schemas` (below) |
-| Compare our capture vs EDMC's | `python3 -m json.tool <ours> \| grep -c '":'` vs same for EDMC's, then diff module lists |
+| Capture a fresh pair | `eddn-tail -S outfitting/2` (or the schema in question), `/` to live-filter on the Software column, `e` to export |
 | Probe EDSM live | `curl -sA ed-journal-monitor-decky "https://www.edsm.net/api-system-v1/bodies?systemName=Sol"` |
 | Record the result | edit `schema-versions.md` |
 
@@ -93,28 +93,74 @@ any field FDev adds to the journal that we blindly pass through will eventually 
 `additionalProperties: false` - a pass-through fill of those (e.g. `SignalBatcher.add_signal()`)
 is exposed to the same risk one level down.
 
-### 4. Diff our own captures against EDMC's
+### 4. Diff a fresh capture of our own message against a reference sender's
 
 Proves a gap rather than merely suspecting one. This is how the `Int_PlanetApproachSuite`
 elision gap (issue tracked in `schema-versions.md`'s "in flight" section) was confirmed, not
-just theorized from the README text:
+just theorized from the README text. It needs live EDDN traffic, captured at audit time with the
+user's `eddn-tail` TUI (repo `~/sandbox/personal/eddn-tail`, entry point `eddn_tail.py`, also on
+`PATH` as `eddn-tail`) - there is no fixture to check out.
+
+**Captures are not checked in.** `example-events/` is gitignored on purpose, alongside the other
+local-exploration paths (`docs/`, `context.md`). A frozen capture is point-in-time evidence of
+what senders did that day, not a durable statement of what the schema requires, and it would rot
+silently while looking authoritative. It also carries another commander's relay-hashed
+`uploaderID` and a third party's software fingerprint - not ours to redistribute. Capture fresh
+every time this step runs; never resurrect or vendor an old export.
+
+**This step needs a human at the keyboard.** `eddn-tail` is an interactive TUI with no headless
+or scripted export mode - run it, watch the stream, export by hand. Reserve step 4 for when you
+need to *prove* a suspected gap, not as something to run unattended on every audit pass.
+
+To capture:
+
+```bash
+eddn-tail -S outfitting/2        # or whatever schema is in question
+```
+
+Then inside the TUI:
+- Press `/` to open the live filter and type a regex matching the Software column, e.g.
+  `ED Journal Monitor Decky` or `E:D Market Connector` - the CLI has no `--software` flag, so this
+  is the only way to isolate a sender. `Uploader` is relay-hashed with a nonce that rotates every
+  3 minutes, so filtering on it is not possible.
+- Select the message you want (`↑`/`↓`, `Enter` for full detail) and press `e` to export it to
+  `eddn_export_<timestamp>.json` in the current directory - this is where the existing capture
+  filenames come from.
+- `p` pauses the stream if you need a moment to read; `q` quits.
+
+Our own message only appears on the relay when the plugin actually uploads - i.e. when the user
+visits a station in-game while the plugin is running. There's no way to force it from outside the
+game.
+
+Two different questions call for two different rigor levels:
+
+- **"What fields does a reference sender send that we don't, or vice versa?"** - the common case.
+  Any two recent same-schema captures work; they don't need to be the same station or the same
+  minute. Grab our own next upload plus any EDMC (or other reference sender) message of the same
+  schema off the live stream.
+- **"Do our values differ from theirs for the same real station?"** - rarer, and only relevant
+  when comparing station-specific data (e.g. do two senders list the same outfitting stock). This
+  needs a same-station, same-minute pair, which is opportunistic - it requires another player
+  filtering through that exact station in that window. Use `eddn-tail -t <station>` to narrow to
+  it, then wait.
+
+Once you have both exports, diff them. The snippet below is written for `outfitting/2`, where
+`message.modules` is a flat list of module-name strings (see `transform_outfitting()` in
+`src/modules/validator.py`, and `outfitting-v2.0.json`) - adjust the field path for other
+schemas' message shapes:
 
 ```bash
 python3 -c "
 import json
 ours = json.load(open('example-events/eddn_export_<ours>.json'))
 theirs = json.load(open('example-events/eddn_export_<edmc>.json'))
-our_mods = {m['Name'] for m in ours['message']['Items']}
-their_mods = {m['Name'] for m in theirs['message']['Items']}
+our_mods = set(ours['message']['modules'])
+their_mods = set(theirs['message']['modules'])
 print('ours only:', our_mods - their_mods)
 print('theirs only:', their_mods - our_mods)
 print(len(our_mods), 'vs', len(their_mods))
 "
 ```
-
-Needs a same-station, same-minute pair of captures in `example-events/` - one from this plugin,
-one from EDMC (or another reference sender) hitting the same station. If no EDMC capture exists
-yet, get one: EDMC logs its own EDDN payloads when its EDDN plugin's verbose logging is enabled.
 
 ### 5. Read the README prose, not just the JSON
 
@@ -168,6 +214,6 @@ rather than guessing at its current behaviour.
 |---|---|
 | `git log <recorded-commit>..HEAD` errors "unknown revision" | Clone depth too shallow to reach the recorded commit - re-clone deeper or `git fetch --unshallow` |
 | Field-dump script finds no `message` key for a schema | That schema's structure differs from the message-envelope shape (e.g. `blackmarket`, `journal`) - read it by hand instead of assuming the loop covers every file uniformly |
-| EDMC capture unavailable for step 4 | Can't prove a gap, only suspect one from README text - note it as unconfirmed rather than asserting it as a real deviation |
+| No reference-sender message showing up in `eddn-tail` for step 4 | Either the sender isn't currently active on the schema you're watching, or the live filter regex doesn't match the Software column text - widen the filter or wait longer before concluding it's absent. If you give up, note the gap as unconfirmed (suspected from README text) rather than asserting it as a real deviation |
 | EDSM probe returns `{}` instead of a list/dict | For `sphere-systems`, this means the queried system isn't known to EDSM (documented behaviour, not a break) - retry with a known system like `Sol` before concluding the contract changed |
 | curl gets `403` from EDSM | User-Agent didn't match - EDSM's Cloudflare rejects the default `curl`/`urllib` UA; the `-A "ed-journal-monitor-decky"` flag above is required, not optional |
