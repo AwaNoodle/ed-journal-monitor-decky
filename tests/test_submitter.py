@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from conftest import MockSettings
 
-from src.modules.submitter import EDDN_URL, MAX_RETRIES, EDDNSubmitter
+from src.modules.submitter import EDDN_URL, INITIAL_RETRY_DELAY, MAX_RETRIES, EDDNSubmitter
 
 
 @pytest.fixture
@@ -40,7 +40,9 @@ class TestMessageConstruction:
         assert message["header"]["uploaderID"] == "test-uploader"
         assert message["header"]["softwareName"] == "ED Journal Monitor Decky"
         assert message["header"]["softwareVersion"] == "0.1.0"
-        assert "gatewayTimestamp" in message["header"]
+        # EDDN schemas: "this property will be overwritten by the gateway;
+        # submitters are not intended to populate this property."
+        assert "gatewayTimestamp" not in message["header"]
 
     @pytest.mark.asyncio
     async def test_submit_includes_game_version_in_header(self, submitter):
@@ -68,7 +70,9 @@ class TestMessageConstruction:
         assert message["header"]["gamebuild"] == "r280105/r0 "
 
     @pytest.mark.asyncio
-    async def test_submit_omits_game_version_when_empty(self, submitter):
+    async def test_submit_sends_empty_string_game_version_when_not_provided(self, submitter):
+        """docs/Developers.md: if a data-source value can't be set, the field
+        MUST still be sent with an empty string value, not omitted."""
         message = {
             "$schemaRef": "https://eddn.edcd.io/schemas/journal/1",
             "header": {},
@@ -85,8 +89,8 @@ class TestMessageConstruction:
             result = await submitter.submit(message)
 
         assert result is True
-        assert "gameversion" not in message["header"]
-        assert "gamebuild" not in message["header"]
+        assert message["header"]["gameversion"] == ""
+        assert message["header"]["gamebuild"] == ""
 
     @pytest.mark.asyncio
     async def test_submit_sends_correct_url(self, submitter):
@@ -205,6 +209,24 @@ class TestRetryLogic:
 
         assert result is False
         assert mock_urlopen.call_count == MAX_RETRIES + 1
+
+
+class TestRetryDelay:
+    """docs/Developers.md: 'You MUST wait some reasonable time (minimum
+    1 minute) before retrying any failed message.'"""
+
+    def test_initial_retry_delay_meets_minimum(self, submitter):
+        assert INITIAL_RETRY_DELAY >= 60
+
+    def test_first_retry_delay_is_at_least_60_seconds(self, submitter):
+        delay = submitter._calculate_retry_delay(0)
+        assert delay >= 60.0
+
+    def test_backoff_still_grows_with_attempts(self, submitter):
+        first = submitter._calculate_retry_delay(0)
+        second = submitter._calculate_retry_delay(1)
+        # Jitter is at most 1s, so a real doubling is still detectable.
+        assert second > first + 1
 
 
 class TestActivityLogIntegration:

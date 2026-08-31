@@ -15,8 +15,8 @@ from src.modules.constants import REPORTABLE_EVENTS
 @dataclass
 class SessionState:
     """Tracks state from the current ED session (LoadGame/Fileheader)."""
-    horizons: bool = True
-    odyssey: bool = True
+    horizons: bool | None = None
+    odyssey: bool | None = None
     game_version: str = ""
     game_build: str = ""
     commander: str = ""
@@ -97,9 +97,15 @@ class JournalParser:
         self.session_state.game_build = data.get("build", "")
 
     def _handle_loadgame(self, data: dict) -> None:
-        """Extract commander name, horizons/odyssey flags from LoadGame event."""
-        self.session_state.horizons = data.get("Horizons", True)
-        self.session_state.odyssey = data.get("Odyssey", True)
+        """Extract commander name, horizons/odyssey flags from LoadGame event.
+
+        Only set horizons/odyssey when the LoadGame event actually carries the
+        key: EDDN requires omitting them entirely when unknown, never guessing.
+        """
+        if "Horizons" in data:
+            self.session_state.horizons = data.get("Horizons")
+        if "Odyssey" in data:
+            self.session_state.odyssey = data.get("Odyssey")
         commander = data.get("Commander", "")
         if commander:
             self.session_state.commander = commander
