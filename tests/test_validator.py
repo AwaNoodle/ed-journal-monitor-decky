@@ -1716,6 +1716,56 @@ class TestTransformCommodity:
         assert message is not None
         assert message["message"]["commodities"][0]["statusFlags"] == ["powerplay", "producer"]
 
+    def test_transform_commodity_includes_station_type_and_carrier_docking_access(self, validator):
+        """EDDN commodity/3 now allows stationType and carrierDockingAccess (both optional)."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Carrier",
+            "StationType": "FleetCarrier",
+            "MarketID": 123,
+            "CarrierDockingAccess": "all",
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "MeanPrice": 47113,
+                    "SellPrice": 48632,
+                    "Demand": 166200,
+                    "DemandBracket": 3,
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["stationType"] == "FleetCarrier"
+        assert message["message"]["carrierDockingAccess"] == "all"
+
+    def test_transform_commodity_omits_station_type_and_carrier_docking_access_when_absent(self, validator):
+        """Neither field has any journal-side source when not present on the entry."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "MeanPrice": 47113,
+                    "SellPrice": 48632,
+                    "Demand": 166200,
+                    "DemandBracket": 3,
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert "stationType" not in message["message"]
+        assert "carrierDockingAccess" not in message["message"]
+
     def test_transform_commodity_survives_unhashable_status_flags(self, validator):
         """A malformed StatusFlags entry must not crash the transform.
 

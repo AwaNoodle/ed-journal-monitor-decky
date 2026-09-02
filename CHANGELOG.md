@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - FSSSignalDiscovered batch uploads now report the timestamp of the first signal in the batch, not the last, matching EDDN's schema.
 - The Horizons/Odyssey flags on uploaded events now reflect only what the game has actually reported, instead of assuming both are owned before that's been confirmed.
 
+### Added
+
+- Commodity market uploads now include the station type and, for fleet carriers, docking access, matching EDDN's current schema.
+
 ### Changed
 
 - Failed EDDN uploads now wait at least a minute before retrying (previously as little as 5 seconds), in line with EDDN's guidance.
