@@ -515,6 +515,15 @@ class EDDNValidator:
             "marketId": market_id,
             "commodities": commodities,
         }
+
+        station_type = market_data.get("StationType")
+        if station_type:
+            message_payload["stationType"] = station_type
+
+        carrier_docking_access = market_data.get("CarrierDockingAccess")
+        if carrier_docking_access:
+            message_payload["carrierDockingAccess"] = carrier_docking_access
+
         _set_horizons_odyssey(message_payload, session_state)
 
         return {
