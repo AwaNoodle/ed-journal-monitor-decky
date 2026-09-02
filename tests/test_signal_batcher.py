@@ -259,7 +259,8 @@ class TestAddSignal:
 class TestMetadata:
     """Tests for metadata tracking from FSSSignalDiscovered events."""
 
-    def test_tracks_last_timestamp(self, batcher):
+    def test_tracks_first_timestamp(self, batcher):
+        """The batch timestamp must be the FIRST signal's, not the last."""
         event1 = _make_signal_event(timestamp="2026-01-12T14:03:00Z")
         event2 = _make_signal_event(timestamp="2026-01-12T14:03:05Z")
         batcher.add_signal(event1)
@@ -267,7 +268,29 @@ class TestMetadata:
 
         session_state = _make_session_state()
         batch_data = batcher.flush(session_state=session_state)
-        assert batch_data["last_timestamp"] == "2026-01-12T14:03:05Z"
+        assert batch_data["first_timestamp"] == "2026-01-12T14:03:00Z"
+
+    def test_first_timestamp_stable_across_many_signals(self, batcher):
+        """The first timestamp must not change regardless of how many
+        further signals are added, or their timestamp order."""
+        batcher.add_signal(_make_signal_event(timestamp="2026-01-12T14:03:00Z"))
+        batcher.add_signal(_make_signal_event(timestamp="2026-01-12T14:03:05Z"))
+        batcher.add_signal(_make_signal_event(timestamp="2026-01-12T14:10:00Z"))
+
+        session_state = _make_session_state()
+        batch_data = batcher.flush(session_state=session_state)
+        assert batch_data["first_timestamp"] == "2026-01-12T14:03:00Z"
+
+    def test_first_timestamp_resets_after_flush(self, batcher):
+        """A new batch after flush must track its own first timestamp,
+        not one left over from the previous batch."""
+        batcher.add_signal(_make_signal_event(timestamp="2026-01-12T14:03:00Z"))
+        session_state = _make_session_state()
+        batcher.flush(session_state=session_state)
+
+        batcher.add_signal(_make_signal_event(timestamp="2026-01-12T15:00:00Z"))
+        batch_data = batcher.flush(session_state=session_state)
+        assert batch_data["first_timestamp"] == "2026-01-12T15:00:00Z"
 
     def test_tracks_system_address(self, batcher):
         event = _make_signal_event(SystemAddress=10477373803)
@@ -293,8 +316,9 @@ class TestMetadata:
         batch_data = batcher.flush(session_state=session_state)
         assert batch_data["star_pos"] == [0.0, 0.0, 0.0]
 
-    def test_metadata_updates_with_latest_signal(self, batcher):
-        """Metadata should reflect the last signal added."""
+    def test_metadata_updates_with_latest_signal_except_timestamp(self, batcher):
+        """SystemAddress/StarSystem/StarPos reflect the last signal added,
+        but the timestamp stays pinned to the first signal."""
         event1 = _make_signal_event(
             SystemAddress=10477373803,
             StarSystem="Sol",
@@ -319,7 +343,7 @@ class TestMetadata:
         assert batch_data["system_address"] == 55230754
         assert batch_data["star_system"] == "Alpha Centauri"
         assert batch_data["star_pos"] == [1.0, 2.0, 3.0]
-        assert batch_data["last_timestamp"] == "2026-01-12T14:03:05Z"
+        assert batch_data["first_timestamp"] == "2026-01-12T14:03:00Z"
 
 
 class TestFlush:
@@ -336,7 +360,7 @@ class TestFlush:
         batch_data = batcher.flush(session_state=session_state)
         assert batch_data is not None
         assert "signals" in batch_data
-        assert "last_timestamp" in batch_data
+        assert "first_timestamp" in batch_data
         assert "system_address" in batch_data
         assert "star_system" in batch_data
         assert "star_pos" in batch_data

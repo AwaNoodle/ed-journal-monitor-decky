@@ -252,7 +252,7 @@ class EDDNValidator:
         """Transform a batch of FSSSignalDiscovered signals into fsssignaldiscovered/1 message.
 
         Args:
-            batch: Dict with keys: signals, last_timestamp, system_address,
+            batch: Dict with keys: signals, first_timestamp, system_address,
                    star_system, star_pos
             session_state: Current session state for augmentation.
 
@@ -277,7 +277,7 @@ class EDDNValidator:
         system_address = batch.get("system_address")
 
         payload: dict = {
-            "timestamp": batch.get("last_timestamp", ""),
+            "timestamp": batch.get("first_timestamp", ""),
             "event": "FSSSignalDiscovered",
             "StarSystem": star_system,
             "StarPos": star_pos,
