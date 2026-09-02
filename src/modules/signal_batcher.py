@@ -42,7 +42,7 @@ class SignalBatcher:
 
     def __init__(self) -> None:
         self._signals: list[dict] = []
-        self._last_timestamp: str | None = None
+        self._first_timestamp: str | None = None
         self._system_address: int | None = None
         self._star_system: str | None = None
         self._star_pos: list[float] | None = None
@@ -75,9 +75,11 @@ class SignalBatcher:
 
         self._signals.append(signal)
 
-        # Update metadata from the event
-        if raw.get("timestamp"):
-            self._last_timestamp = raw["timestamp"]
+        # Record the first signal's timestamp for the batch (per the
+        # fsssignaldiscovered/1 README: the top-level timestamp duplicates
+        # the first signal's, not the last). Stays stable until flush.
+        if raw.get("timestamp") and self._first_timestamp is None:
+            self._first_timestamp = raw["timestamp"]
         if raw.get("SystemAddress") is not None:
             self._system_address = raw["SystemAddress"]
         if raw.get("StarSystem"):
@@ -103,7 +105,7 @@ class SignalBatcher:
         match, the batch is discarded (signals from a system we no longer have
         coordinates for cannot be submitted with valid data).
 
-        Returns dict with: signals, last_timestamp, system_address,
+        Returns dict with: signals, first_timestamp, system_address,
         star_system, star_pos. Clears internal state.
         """
         if not self._signals:
@@ -133,16 +135,16 @@ class SignalBatcher:
         # messages without required positional data.
         if not star_pos or not star_system:
             self._signals = []
-            self._last_timestamp = None
+            self._first_timestamp = None
             return None
 
         result = {
             "signals": self._signals,
-            "last_timestamp": self._last_timestamp,
+            "first_timestamp": self._first_timestamp,
             "system_address": self._system_address,
             "star_system": star_system,
             "star_pos": star_pos,
         }
         self._signals = []
-        self._last_timestamp = None
+        self._first_timestamp = None
         return result

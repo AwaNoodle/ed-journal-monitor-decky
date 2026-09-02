@@ -872,7 +872,7 @@ class TestTransformFSSSignalDiscovered:
         """Helper to build a batch dict for the transform."""
         batch = {
             "signals": signals if signals is not None else [{"SignalName": "TestSignal"}],
-            "last_timestamp": kwargs.get("last_timestamp", "2026-01-12T14:03:05Z"),
+            "first_timestamp": kwargs.get("first_timestamp", "2026-01-12T14:03:05Z"),
             "system_address": kwargs.get("system_address", 10477373803),
             "star_system": kwargs.get("star_system", "Sol"),
             "star_pos": kwargs.get("star_pos", [0.0, 0.0, 0.0]),
@@ -898,6 +898,14 @@ class TestTransformFSSSignalDiscovered:
         batch = self._make_batch(signals=[])
         session_state = SessionState()
         assert validator.transform_fss_signal_discovered(batch, session_state) is None
+
+    def test_uses_first_timestamp_as_message_timestamp(self, validator):
+        """The top-level message timestamp must duplicate the batch's
+        first_timestamp, per the fsssignaldiscovered/1 README."""
+        batch = self._make_batch(first_timestamp="2026-01-12T14:03:00Z")
+        session_state = SessionState()
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+        assert message["message"]["timestamp"] == "2026-01-12T14:03:00Z"
 
     def test_schema_ref(self, validator):
         batch = self._make_batch()
