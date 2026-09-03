@@ -1847,18 +1847,27 @@ class TestTransformCommodity:
         }
         assert validator.transform_commodity(market_data, SessionState()) is None
 
-    def test_nonmarketable_category_filtered(self, validator):
-        """NonMarketable items must be excluded per EDDN commodity-README."""
+    def test_commodity_category_content_never_filters(self, validator):
+        """Category string content must never gate inclusion on the journal path.
+
+        EDDN's commodity-README's "skip categoryname: NonMarketable" instruction
+        applies to EDMC's Companion API export (`categoryname`, an exact-match
+        CAPI field name mapped in EDMC's `companion_category_map`). This plugin
+        only reads Market.json (the journal path), which uses a different field
+        (`Category`/`Category_Localised`, `$MARKET_category_<name>;` format) and
+        never lists limpets as a market commodity at all — confirmed against a
+        live Market.json capture. Only stock/demand brackets gate inclusion.
+        """
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
             "StarSystem": "Sol",
             "StationName": "Test Station",
             "MarketID": 123,
             "Items": [
-                # NonMarketable with high stock bracket — should be filtered
+                # Unusual/unrecognised category with real demand — must pass.
                 {
                     "Name": "$drones_name;",
-                    "Category": "$u16_nondeMarketable_name;",
+                    "Category": "$MARKET_category_nonmarketable;",
                     "BuyPrice": 101,
                     "SellPrice": 95,
                     "MeanPrice": 99,
@@ -1867,10 +1876,9 @@ class TestTransformCommodity:
                     "StockBracket": 3,
                     "DemandBracket": 0,
                 },
-                # Normal commodity — should pass through
                 {
                     "Name": "$hydrogenfuel_name;",
-                    "Category": "$u17_chemicals_name;",
+                    "Category": "$MARKET_category_chemicals;",
                     "BuyPrice": 90,
                     "SellPrice": 85,
                     "MeanPrice": 87,
@@ -1883,27 +1891,8 @@ class TestTransformCommodity:
         }
         message = validator.transform_commodity(market_data, SessionState())
         assert message is not None
-        assert len(message["message"]["commodities"]) == 1
-        assert message["message"]["commodities"][0]["name"] == "hydrogenfuel"
-
-    def test_nonmarketable_all_items_filtered(self, validator):
-        """If all items are NonMarketable, transform returns None."""
-        market_data = {
-            "timestamp": "2026-01-12T13:05:00Z",
-            "StarSystem": "Sol",
-            "StationName": "Test Station",
-            "MarketID": 123,
-            "Items": [
-                {
-                    "Name": "$drones_name;",
-                    "Category": "$u16_nondeMarketable_name;",
-                    "BuyPrice": 101, "SellPrice": 95,
-                    "MeanPrice": 99, "Stock": 9999, "Demand": 0,
-                    "StockBracket": 3, "DemandBracket": 0,
-                },
-            ],
-        }
-        assert validator.transform_commodity(market_data, SessionState()) is None
+        names = {c["name"] for c in message["message"]["commodities"]}
+        assert names == {"drones", "hydrogenfuel"}
 
     def test_commodity_name_sanitization(self, validator):
         """Commodity names with $..._name; format should be sanitized."""

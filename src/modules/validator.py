@@ -476,12 +476,6 @@ class EDDNValidator:
             if not name or not isinstance(name, str):
                 continue
 
-            # Skip NonMarketable commodities (per EDDN commodity-README)
-            # Journal uses "nonde" prefix for "non-" categories
-            category = item.get("Category", "")
-            if category and "nonde" in category.lower():
-                continue
-
             stock_bracket = item.get("StockBracket", 0)
             demand_bracket = item.get("DemandBracket", 0)
             if stock_bracket == 0 and demand_bracket == 0:
