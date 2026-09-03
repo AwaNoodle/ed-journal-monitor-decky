@@ -59,9 +59,8 @@ Each is filed as a GitHub issue; fix or re-accept there, not by editing this row
 
 | Issue | Deviation |
 |---|---|
-| #26 | commodity/3: `stationType` and `carrierDockingAccess` not sent (schema allows both; additive gap, not a rejection) |
-| #28 | fsssignaldiscovered: batch `timestamp` uses the *last* signal's, not the first's, contra the README/schema |
-| #29 | commodity: the `NonMarketable` category filter (`validator.py`) matches a category string pattern (`nonde`) not seen in any real journal category (`$MARKET_category_<name>;`); likely dead code, unverified against a real `Market.json` |
+| #38 | codexentry/1: `REQUIRED_FIELDS["CodexEntry"]` demands `BodyID`/`BodyName`, which the schema lists as optional and the README says MUST be omitted when Status.json has no body — so any codex entry logged away from a body is dropped by `validate()` before transform, with only a debug log line |
+| #39 | codexentry/1: `BodyName`/`BodyID` are forwarded straight from the journal event, without the Status.json cross-check the README mandates (no Status.json reader or body tracking exists yet); schema-legal, so the gateway accepts it — a data-quality deviation, not a rejection |
 
 ### Fixed since the 2026-08-29 audit
 
@@ -77,6 +76,18 @@ the gaps below - no longer deviations:
   plugin no longer populates it)
 - retry backoff now starts at 60s (`INITIAL_RETRY_DELAY`), meeting the documented 1-minute
   minimum, with the cap raised to 300s
+
+Shipped individually after that branch, each closing its own audit issue - also no longer
+deviations:
+
+- #26 → PR #33 (commit `2d1d6c3`, released in 0.8.3): commodity/3 now sends `stationType`, and
+  `carrierDockingAccess` when the journal supplies it
+- #28 → PR #34 (commit `ebbdb7b`, released in 0.8.3): the fsssignaldiscovered/1 batch `timestamp`
+  is now the *first* signal's, per the README
+- #29 → PR #35 (commit `5607405`, unreleased - no observable change): the `NonMarketable` category
+  filter was dead code and was removed. Verified against a real `Market.json` from the device: no
+  category string contains `nonde`, and limpets never appear as a market commodity at all. The
+  README instruction targets EDMC's CAPI path (`categoryname`), which this plugin never reads
 
 ### Fixed since the 2026-09-03 audit
 
