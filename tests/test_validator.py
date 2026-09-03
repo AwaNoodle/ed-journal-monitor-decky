@@ -984,6 +984,26 @@ class TestTransformFSSSignalDiscovered:
         assert signal["SignalName"] == "$Test;"
         assert signal["SpawningState"] == "$Boom;"
 
+    def test_projection_strips_time_remaining_and_event_from_signals(self, validator):
+        """TimeRemaining is disallowed and 'event'/'SystemAddress' are message-level per
+        fsssignaldiscovered/1's signals[] allow-list; the final `_project_allowed` call
+        strips them from each signal even though the batcher no longer does."""
+        signals = [{
+            "SignalName": "$Test;",
+            "TimeRemaining": 120.5,
+            "event": "FSSSignalDiscovered",
+            "SystemAddress": 10477373803,
+        }]
+        batch = self._make_batch(signals=signals)
+        session_state = SessionState()
+        message = validator.transform_fss_signal_discovered(batch, session_state)
+
+        signal = message["message"]["signals"][0]
+        assert "TimeRemaining" not in signal
+        assert "event" not in signal
+        assert "SystemAddress" not in signal
+        assert signal["SignalName"] == "$Test;"
+
 
 class TestTransformFSSDiscoveryScan:
     """Tests for transform_fss_discovery_scan method."""
@@ -1459,7 +1479,7 @@ class TestTransformCodexEntry:
                 "EntryID": 123,
                 "BodyID": 1,
                 "BodyName": "Earth",
-                "StarSystem": "Sol",
+                "System": "Sol",
                 "StarPos": [0.0, 0.0, 0.0],
             },
             event_type="CodexEntry",
@@ -1477,7 +1497,7 @@ class TestTransformCodexEntry:
         assert payload["EntryID"] == 123
         assert payload["BodyID"] == 1
         assert payload["BodyName"] == "Earth"
-        assert payload["StarSystem"] == "Sol"
+        assert payload["System"] == "Sol"
         assert payload["SystemAddress"] == 10477373803
         assert payload["StarPos"] == [0.0, 0.0, 0.0]
         assert payload["horizons"] is True
@@ -1602,7 +1622,9 @@ class TestTransformCodexEntry:
 
         assert "NewTraitsDiscovered" not in message["message"]
 
-    def test_augments_star_pos_from_session_state(self, validator):
+    def test_augments_star_pos_and_system_from_session_state(self, validator):
+        """codexentry/1 names the field System, not StarSystem -- augmenting from
+        session_state must write System, matching what a real CodexEntry event uses."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T15:00:00Z",
@@ -1625,7 +1647,8 @@ class TestTransformCodexEntry:
         message = validator.transform_codex_entry(event, session_state)
 
         assert message["message"]["StarPos"] == [1.0, 2.0, 3.0]
-        assert message["message"]["StarSystem"] == "Sol"
+        assert message["message"]["System"] == "Sol"
+        assert "StarSystem" not in message["message"]
 
     def test_strips_localised_keys(self, validator):
         """_Localised keys should be stripped from codexentry/1 messages."""
@@ -1651,6 +1674,32 @@ class TestTransformCodexEntry:
 
         assert "Name_Localised" not in message["message"]
         assert message["message"]["Name"] == "$Codex_Ent_Name_1;"
+
+    def test_star_system_never_leaks_into_output(self, validator):
+        """Regression for issue #27: codexentry/1's message has no StarSystem property
+        (additionalProperties: false), only System. Even if a raw event carried
+        StarSystem, the allow-list projection must drop it rather than submit a message
+        the gateway would reject."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "Name": "$Codex_Ent_Name_1;",
+                "Region": "TestRegion",
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+                "StarSystem": "Sol",
+                "StarPos": [0.0, 0.0, 0.0],
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(horizons=True, odyssey=True)
+        message = validator.transform_codex_entry(event, session_state)
+
+        assert "StarSystem" not in message["message"]
 
 
 class TestTransformCommodity:

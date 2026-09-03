@@ -124,5 +124,3 @@ EDDN_FACTIONS_DISALLOWED_FIELDS = {
     "SquadronFaction",
 }
 
-# Fields stripped from individual FSSSignalDiscovered signals before batching
-FSS_SIGNAL_DISALLOWED_FIELDS = {"TimeRemaining", "event", "SystemAddress"}

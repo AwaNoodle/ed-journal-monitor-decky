@@ -20,7 +20,6 @@ from src.modules.constants import (
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
-    FSS_SIGNAL_DISALLOWED_FIELDS,
     JOURNAL_1_ONLY_DISALLOWED,
     REPORTABLE_EVENTS,
 )
@@ -174,25 +173,6 @@ class TestDisallowedFields:
     def test_journal1_only_disallowed_complete(self):
         expected = {"Latitude", "Longitude", "VoucherAmount", "Traits"}
         assert expected == JOURNAL_1_ONLY_DISALLOWED
-
-
-class TestFssSignalDisallowedFields:
-    def test_time_remaining_in_disallowed(self):
-        assert "TimeRemaining" in FSS_SIGNAL_DISALLOWED_FIELDS
-
-    def test_event_in_disallowed(self):
-        assert "event" in FSS_SIGNAL_DISALLOWED_FIELDS
-
-    def test_system_address_in_disallowed(self):
-        """SystemAddress belongs at message level, not in individual signals."""
-        assert "SystemAddress" in FSS_SIGNAL_DISALLOWED_FIELDS
-
-    def test_timestamp_not_in_disallowed(self):
-        """Timestamp must be preserved in signals for fsssignaldiscovered/1 schema."""
-        assert "timestamp" not in FSS_SIGNAL_DISALLOWED_FIELDS
-
-    def test_complete_set(self):
-        assert {"TimeRemaining", "event", "SystemAddress"} == FSS_SIGNAL_DISALLOWED_FIELDS
 
 
 class TestDedicatedSchemaEvents:

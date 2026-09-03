@@ -18,8 +18,6 @@ before system-position events in the journal order.
 
 from typing import TYPE_CHECKING, ClassVar
 
-from src.modules.constants import FSS_SIGNAL_DISALLOWED_FIELDS
-
 if TYPE_CHECKING:
     from src.modules.parser import ParsedEvent, SessionState
 
@@ -61,12 +59,14 @@ class SignalBatcher:
         if raw.get("USSType") == "$USS_Type_MissionTarget;":
             return
 
-        # Extract signal data: keep everything except disallowed, _Localised,
-        # and message-level fields
+        # Extract signal data: keep everything except _Localised and
+        # message-level fields. The gateway's own allow-list, applied at
+        # transform time (`_project_allowed` in validator.py against
+        # fsssignaldiscovered/1's `signals[]` allow-list), is what excludes
+        # remaining unlisted fields (e.g. TimeRemaining, event) -- this loop
+        # only needs to keep message-level fields out of the per-signal dict.
         signal: dict = {}
         for key, value in raw.items():
-            if key in FSS_SIGNAL_DISALLOWED_FIELDS:
-                continue
             if key in _MESSAGE_LEVEL_FIELDS:
                 continue
             if key.endswith("_Localised"):

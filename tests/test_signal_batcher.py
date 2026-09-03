@@ -86,23 +86,27 @@ class TestAddSignal:
         assert batch_data["signals"][0]["SignalName"] == "Signal1"
         assert batch_data["signals"][1]["SignalName"] == "Signal2"
 
-    def test_strips_time_remaining(self, batcher):
-        """TimeRemaining is disallowed in fsssignaldiscovered/1 and must be stripped."""
+    def test_does_not_strip_time_remaining(self, batcher):
+        """TimeRemaining is disallowed in fsssignaldiscovered/1's signals[], but the
+        batcher no longer filters it -- that's now the final allow-list projection's
+        job (`_project_allowed` in validator.py), applied once at transform time."""
         event = _make_signal_event(TimeRemaining=120.5)
         batcher.add_signal(event)
 
         session_state = _make_session_state()
         batch_data = batcher.flush(session_state=session_state)
-        assert "TimeRemaining" not in batch_data["signals"][0]
+        assert batch_data["signals"][0]["TimeRemaining"] == 120.5
 
-    def test_strips_event_field(self, batcher):
-        """The 'event' field must not appear in individual signals."""
+    def test_does_not_strip_event_field(self, batcher):
+        """The 'event' field is message-level per fsssignaldiscovered/1, but the batcher
+        no longer filters it out of the raw signal -- the allow-list projection at
+        transform time excludes it from the final message."""
         event = _make_signal_event()
         batcher.add_signal(event)
 
         session_state = _make_session_state()
         batch_data = batcher.flush(session_state=session_state)
-        assert "event" not in batch_data["signals"][0]
+        assert batch_data["signals"][0]["event"] == "FSSSignalDiscovered"
 
     def test_preserves_timestamp_in_signal(self, batcher):
         """Timestamp must be preserved in each signal per fsssignaldiscovered/1 schema."""

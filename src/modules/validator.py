@@ -28,6 +28,7 @@ from src.modules.constants import (
     EDDN_SHIPYARD_2_SCHEMA_REF,
     JOURNAL_1_ONLY_DISALLOWED,
 )
+from src.modules.eddn_allowed_fields import ALLOW_LISTS, SchemaAllowList
 
 if TYPE_CHECKING:
     from src.modules.parser import ParsedEvent, SessionState
@@ -57,27 +58,65 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
 }
 
 
-def _strip_disallowed(obj: object, keep_fields: set[str] | None = None) -> object:
+def _strip_disallowed(obj: object) -> object:
     """
     Recursively strip EDDN-disallowed keys from a data structure.
 
     Removes:
     - Keys in EDDN_DISALLOWED_FIELDS
     - Keys ending in '_Localised' (EDDN schema rejects these at all levels)
-    - Keys in keep_fields are preserved even if they'd otherwise be stripped
 
     Handles nested dicts and lists (e.g. Factions[], StationEconomies[]).
+
+    Only used for schemas whose containers are *open*
+    (``additionalProperties: true``, or no constraint at all): journal/1's
+    top-level message, and fcmaterials_journal/1's per-item Items[]. Every
+    strict (``additionalProperties: false``) container is instead built via
+    `_project_allowed()`, which intersects with the schema's allow-list
+    rather than subtracting known-bad fields.
     """
     if isinstance(obj, dict):
         return {
-            k: _strip_disallowed(v, keep_fields)
+            k: _strip_disallowed(v)
             for k, v in obj.items()
-            if (k not in EDDN_DISALLOWED_FIELDS or (keep_fields and k in keep_fields))
-            and not k.endswith("_Localised")
+            if k not in EDDN_DISALLOWED_FIELDS and not k.endswith("_Localised")
         }
     if isinstance(obj, list):
-        return [_strip_disallowed(item, keep_fields) for item in obj]
+        return [_strip_disallowed(item) for item in obj]
     return obj
+
+
+def _project_allowed(payload: dict, allow: SchemaAllowList) -> dict:
+    """
+    Project `payload` onto the exact key set a strict EDDN schema permits.
+
+    Keeps only keys named in `allow.message`, preserving insertion order.
+    For each key also named in `allow.nested`, further projects that key's
+    value onto the nested allow-list: a `dict` value is projected directly,
+    and a `list` value has each `dict` item projected (non-dict items pass
+    through unchanged). Pure -- never mutates `payload` -- and applied as
+    the last step of every strict-schema transform, after every
+    augmentation, so nothing added by our own code can smuggle in an
+    unlisted key.
+    """
+    projected: dict = {}
+    for key, raw_value in payload.items():
+        if key not in allow.message:
+            continue
+        nested_allowed = allow.nested.get(key)
+        value = raw_value
+        if nested_allowed is not None:
+            if isinstance(raw_value, dict):
+                value = {k: v for k, v in raw_value.items() if k in nested_allowed}
+            elif isinstance(raw_value, list):
+                value = [
+                    {k: v for k, v in item.items() if k in nested_allowed}
+                    if isinstance(item, dict)
+                    else item
+                    for item in raw_value
+                ]
+        projected[key] = value
+    return projected
 
 
 def _sanitize_eddn_name(name: str) -> str:
@@ -214,6 +253,11 @@ class EDDNValidator:
         4. Augment with StarPos/StarSystem if missing and available
         5. Augment with horizons/odyssey flags
         6. Wrap in EDDN message structure
+
+        journal/1 declares ``additionalProperties: true`` on message -- it is
+        the one open schema this plugin emits to, so it stays on the
+        blacklist (`_strip_disallowed`) rather than the allow-list projection
+        used for every other (strict) schema.
         """
         # Recursively strip disallowed fields and _Localised keys
         message_payload = _strip_disallowed(event.raw)
@@ -285,6 +329,7 @@ class EDDNValidator:
             "signals": cleaned_signals,
         }
         _set_horizons_odyssey(payload, session_state)
+        payload = _project_allowed(payload, ALLOW_LISTS[EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_FSSSIGNALDISCOVERED_1_SCHEMA_REF,
@@ -295,16 +340,11 @@ class EDDNValidator:
     def transform_fss_discovery_scan(self, event: ParsedEvent, session_state: SessionState) -> dict:
         """Transform a FSSDiscoveryScan event into fssdiscoveryscan/1 message.
 
-        Strips disallowed fields and _Localised keys, then builds message
-        with required fields: timestamp, StarSystem, StarPos, SystemAddress,
-        BodyCount, NonBodyCount, horizons, odyssey.
+        Builds message with required fields: timestamp, StarSystem, StarPos,
+        SystemAddress, BodyCount, NonBodyCount, horizons, odyssey, then
+        projects onto the schema's allow-list.
         """
-        # Strip disallowed fields and _Localised
-        message_payload = _strip_disallowed(event.raw)
-
-        # Strip journal/1-only disallowed fields
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         # fssdiscoveryscan/1 uses SystemName (same as journal), not StarSystem
         # No rename needed - SystemName is the correct field name for this schema.
@@ -322,6 +362,8 @@ class EDDNValidator:
 
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
+
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_FSSDISCOVERYSCAN_1_SCHEMA_REF,
@@ -344,12 +386,7 @@ class EDDNValidator:
         if auxiliary_data.get("event") == "NavRouteClear":
             return None
 
-        # Strip disallowed and _Localised from the top-level payload
-        message_payload = _strip_disallowed(auxiliary_data)
-
-        # Strip journal/1-only disallowed fields
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(auxiliary_data)
 
         # Strip _Localised from Route entries
         route = message_payload.get("Route")
@@ -363,15 +400,13 @@ class EDDNValidator:
                     cleaned_route.append(entry)
             message_payload["Route"] = cleaned_route
 
-        # Remove message-level StarSystem/StarPos/SystemAddress if present.
-        # The navroute/1 schema does not allow these at message level;
-        # they belong inside individual Route entries only.
-        message_payload.pop("StarSystem", None)
-        message_payload.pop("StarPos", None)
-        message_payload.pop("SystemAddress", None)
-
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
+
+        # navroute/1's allow-list has no message-level StarSystem/StarPos/
+        # SystemAddress entry -- they belong only inside Route[] entries -- so
+        # projection drops them here without an explicit pop.
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_NAVROUTE_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_NAVROUTE_1_SCHEMA_REF,
@@ -384,16 +419,8 @@ class EDDNValidator:
 
         Preserves Latitude and Longitude (required by this schema).
         Renames StationName→Name (EDDN schema uses Name).
-        Strips other disallowed fields and _Localised keys.
         """
-        # Strip disallowed fields, but keep Latitude/Longitude
-        keep_fields = {"Latitude", "Longitude"}
-        message_payload = _strip_disallowed(event.raw, keep_fields=keep_fields)
-
-        # Strip journal/1-only disallowed fields EXCEPT Latitude/Longitude
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            if field not in keep_fields:
-                message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         # Rename StationName→Name (EDDN approachsettlement/1 uses "Name")
         if "StationName" in message_payload:
@@ -416,6 +443,8 @@ class EDDNValidator:
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
             "header": {},
@@ -425,30 +454,28 @@ class EDDNValidator:
     def transform_codex_entry(self, event: ParsedEvent, session_state: SessionState) -> dict:
         """Transform a CodexEntry event into codexentry/1 message.
 
-        Preserves fields that are disallowed in journal/1 but valid in
-        codexentry/1: VoucherAmount, Traits, IsNewEntry, NewTraitsDiscovered.
+        codexentry/1 names the system field ``System`` (required), not
+        ``StarSystem`` -- a real CodexEntry journal event never carries
+        ``StarSystem``, so this augments ``System`` from session state when
+        absent, under the same SystemAddress cross-check the other
+        augmentations use.
         """
-        # Strip disallowed fields, but keep codexentry-specific fields
-        keep_fields = {"VoucherAmount", "Traits"}
-        message_payload = _strip_disallowed(event.raw, keep_fields=keep_fields)
+        message_payload = dict(event.raw)
 
-        # Strip journal/1-only disallowed fields EXCEPT the ones we're keeping
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            if field not in keep_fields:
-                message_payload.pop(field, None)
-
-        # Augment StarPos/StarSystem from session_state
+        # Augment StarPos/System from session_state
         if "StarPos" not in message_payload and session_state.star_pos:
             event_sys = message_payload.get("SystemAddress")
             if event_sys is None or event_sys == session_state.system_address:
                 message_payload["StarPos"] = session_state.star_pos
-        if "StarSystem" not in message_payload and session_state.star_system:
+        if "System" not in message_payload and session_state.star_system:
             event_sys = message_payload.get("SystemAddress")
             if event_sys is None or event_sys == session_state.system_address:
-                message_payload["StarSystem"] = session_state.star_system
+                message_payload["System"] = session_state.star_system
 
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
+
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_CODEXENTRY_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_CODEXENTRY_1_SCHEMA_REF,
@@ -520,6 +547,8 @@ class EDDNValidator:
 
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_COMMODITY_3_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_COMMODITY_3_SCHEMA_REF,
             "header": {},
@@ -567,6 +596,8 @@ class EDDNValidator:
         }
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_OUTFITTING_2_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_OUTFITTING_2_SCHEMA_REF,
             "header": {},
@@ -607,6 +638,8 @@ class EDDNValidator:
         }
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_SHIPYARD_2_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_SHIPYARD_2_SCHEMA_REF,
             "header": {},
@@ -616,16 +649,11 @@ class EDDNValidator:
     def transform_navbeacon_scan(self, event: ParsedEvent, session_state: SessionState) -> dict:
         """Transform a NavBeaconScan event into navbeaconscan/1 message.
 
-        Strips disallowed fields and _Localised keys, then builds message
-        with required fields: timestamp, event, StarSystem, StarPos,
-        SystemAddress, NumBodies, horizons, odyssey.
+        Builds message with required fields: timestamp, event, StarSystem,
+        StarPos, SystemAddress, NumBodies, horizons, odyssey, then projects
+        onto the schema's allow-list.
         """
-        # Strip disallowed fields and _Localised
-        message_payload = _strip_disallowed(event.raw)
-
-        # Strip journal/1-only disallowed fields
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         # Augment StarPos from session_state if missing
         if "StarPos" not in message_payload and session_state.star_pos:
@@ -641,6 +669,8 @@ class EDDNValidator:
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_NAVBEACONSCAN_1_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_NAVBEACONSCAN_1_SCHEMA_REF,
             "header": {},
@@ -652,16 +682,11 @@ class EDDNValidator:
     ) -> dict:
         """Transform an FSSAllBodiesFound event into fssallbodiesfound/1 message.
 
-        Strips disallowed fields and _Localised keys, augments StarPos from
-        session state (not present in the journal event), and injects
-        horizons/odyssey flags.
+        Augments StarPos/SystemName from session state (not present in the
+        journal event), injects horizons/odyssey, then projects onto the
+        schema's allow-list.
         """
-        # Strip disallowed fields and _Localised
-        message_payload = _strip_disallowed(event.raw)
-
-        # Strip journal/1-only disallowed fields
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         # Augment StarPos from session_state (not in journal event)
         if "StarPos" not in message_payload and session_state.star_pos:
@@ -678,6 +703,8 @@ class EDDNValidator:
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_FSSALLBODIESFOUND_1_SCHEMA_REF,
             "header": {},
@@ -689,15 +716,12 @@ class EDDNValidator:
     ) -> dict | None:
         """Transform a ScanBaryCentre event into a scanbarycentre/1 message.
 
-        Strips disallowed/_Localised fields, augments StarSystem and StarPos
-        from session state (StarPos is not present in the journal event), and
-        injects horizons/odyssey. Returns None when StarPos cannot be supplied,
-        since it is required by the schema.
+        Augments StarSystem and StarPos from session state (StarPos is not
+        present in the journal event), injects horizons/odyssey, then
+        projects onto the schema's allow-list. Returns None when StarPos
+        cannot be supplied, since it is required by the schema.
         """
-        message_payload = _strip_disallowed(event.raw)
-
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         # Augment StarPos/StarSystem from session state, gated by SystemAddress
         event_sys = message_payload.get("SystemAddress")
@@ -713,6 +737,8 @@ class EDDNValidator:
 
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_SCANBARYCENTRE_1_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
             "header": {},
@@ -724,16 +750,14 @@ class EDDNValidator:
     ) -> dict | None:
         """Transform an FSSBodySignals event into an fssbodysignals/1 message.
 
-        Strips disallowed fields and _Localised keys (including Type_Localised
-        nested inside Signals[]), augments StarSystem and StarPos from session
-        state (neither is present in the journal event), and injects
-        horizons/odyssey. Returns None when StarSystem/StarPos cannot be
-        supplied, since both are required by the schema.
+        Augments StarSystem and StarPos from session state (neither is
+        present in the journal event), injects horizons/odyssey, then
+        projects onto the schema's allow-list -- which is what strips
+        Type_Localised from Signals[] items. Returns None when
+        StarSystem/StarPos cannot be supplied, since both are required by
+        the schema.
         """
-        message_payload = _strip_disallowed(event.raw)
-
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         # Augment StarPos/StarSystem from session state, gated by SystemAddress
         event_sys = message_payload.get("SystemAddress")
@@ -749,6 +773,8 @@ class EDDNValidator:
 
         _set_horizons_odyssey(message_payload, session_state)
 
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_FSSBODYSIGNALS_1_SCHEMA_REF])
+
         return {
             "$schemaRef": EDDN_FSSBODYSIGNALS_1_SCHEMA_REF,
             "header": {},
@@ -761,15 +787,15 @@ class EDDNValidator:
         """Transform a DockingGranted event into a dockinggranted/1 message.
 
         Station-context schema: passes through LandingPad, MarketID,
-        StationName, StationType (no StarPos/StarSystem augmentation), strips
-        disallowed/_Localised fields, and injects horizons/odyssey.
+        StationName, StationType (no StarPos/StarSystem augmentation),
+        injects horizons/odyssey, then projects onto the schema's
+        allow-list.
         """
-        message_payload = _strip_disallowed(event.raw)
-
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         _set_horizons_odyssey(message_payload, session_state)
+
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_DOCKINGGRANTED_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_DOCKINGGRANTED_1_SCHEMA_REF,
@@ -783,16 +809,15 @@ class EDDNValidator:
         """Transform a DockingDenied event into a dockingdenied/1 message.
 
         Station-context schema: passes through Reason, MarketID, StationName,
-        StationType (no StarPos/StarSystem augmentation), strips
-        disallowed/_Localised fields (including Reason_Localised), and injects
-        horizons/odyssey.
+        StationType (no StarPos/StarSystem augmentation), injects
+        horizons/odyssey, then projects onto the schema's allow-list --
+        which is what strips Reason_Localised.
         """
-        message_payload = _strip_disallowed(event.raw)
-
-        for field in JOURNAL_1_ONLY_DISALLOWED:
-            message_payload.pop(field, None)
+        message_payload = dict(event.raw)
 
         _set_horizons_odyssey(message_payload, session_state)
+
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_DOCKINGDENIED_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_DOCKINGDENIED_1_SCHEMA_REF,
@@ -804,6 +829,10 @@ class EDDNValidator:
         """Transform FCMaterials.json data into fcmaterials_journal/1 EDDN schema.
 
         Returns None if required fields are missing or Items list is empty.
+
+        Items[] carries no ``additionalProperties`` constraint upstream (an
+        open container), so each item stays on `_strip_disallowed()` rather
+        than an allow-list; only the message envelope is projected.
         """
         timestamp = fc_data.get("timestamp", "")
         market_id = fc_data.get("MarketID")
@@ -836,6 +865,8 @@ class EDDNValidator:
             "Items": cleaned_items,
         }
         _set_horizons_odyssey(message_payload, session_state)
+
+        message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF])
 
         return {
             "$schemaRef": EDDN_FCMATERIALS_JOURNAL_1_SCHEMA_REF,
