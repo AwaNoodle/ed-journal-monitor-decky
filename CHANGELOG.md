@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- CodexEntry discovery uploads (new Codex entries found while exploring) are now accepted by EDDN instead of being rejected.
+
 ## [0.8.3] - 2026-09-03
 
 ### Added

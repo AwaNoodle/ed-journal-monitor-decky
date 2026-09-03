@@ -17,6 +17,15 @@ file current.
   conformant sender actually does. Confirmed disagreement as of this audit: `commodity-README.md`
   still says *"You MUST remove `StationType`"*, but `commodity-v3.0.json`'s `message` object now
   names `stationType` as an allowed property (schema wins - it's fine to send).
+- **Schema fixtures**: `tests/fixtures/eddn-schemas/` vendors the 16 schema JSON files
+  (approachsettlement, codexentry, commodity, dockingdenied, dockinggranted,
+  fcmaterials_journal, fssallbodiesfound, fssbodysignals, fssdiscoveryscan,
+  fsssignaldiscovered, journal, navbeaconscan, navroute, outfitting, scanbarycentre,
+  shipyard), pinned at the commit above. `tests/test_eddn_allowed_fields.py` re-derives
+  each strict schema's allow-list from these fixtures and asserts it matches
+  `src/modules/eddn_allowed_fields.py`; `tests/test_eddn_schema_conformance.py` validates
+  transform output against them directly. Refresh both the fixtures and this file together
+  per the `checking-schema-updates` skill - a stale fixture makes the drift test lie.
 
 ### Schemas this plugin emits
 
@@ -51,7 +60,6 @@ Each is filed as a GitHub issue; fix or re-accept there, not by editing this row
 | Issue | Deviation |
 |---|---|
 | #26 | commodity/3: `stationType` and `carrierDockingAccess` not sent (schema allows both; additive gap, not a rejection) |
-| #27 | Strict (`additionalProperties: false`) schemas are built from a blacklist (subtract known-bad fields) rather than an allow-list (intersect with known-good fields); the next FDev field addition to a covered event breaks submission until patched |
 | #28 | fsssignaldiscovered: batch `timestamp` uses the *last* signal's, not the first's, contra the README/schema |
 | #29 | commodity: the `NonMarketable` category filter (`validator.py`) matches a category string pattern (`nonde`) not seen in any real journal category (`$MARKET_category_<name>;`); likely dead code, unverified against a real `Market.json` |
 
@@ -69,6 +77,24 @@ the gaps below - no longer deviations:
   plugin no longer populates it)
 - retry backoff now starts at 60s (`INITIAL_RETRY_DELAY`), meeting the documented 1-minute
   minimum, with the cap raised to 300s
+
+### Fixed since the 2026-09-03 audit
+
+Branch `issue-27-eddn-allow-list`, closing #27 (allow-list rework; no upstream schema
+change involved - `4ad669b` is still current):
+
+- Every strict (`additionalProperties: false`) schema this plugin builds now projects
+  onto an allow-list derived from the schema itself (`src/modules/eddn_allowed_fields.py`,
+  applied via `_project_allowed()` in `validator.py`), instead of subtracting a
+  hand-maintained blacklist of known-bad fields. `journal/1` and
+  `fcmaterials_journal/1`'s `Items[]` are unchanged (genuinely open containers).
+- Fixed a live defect this surfaced: `transform_codex_entry()` was injecting a
+  `StarSystem` key that `codexentry/1`'s message schema does not allow (the schema
+  names the field `System`, which real CodexEntry journal events already carry).
+  Since `session_state.star_system` is populated for virtually every session,
+  this meant essentially every CodexEntry discovery upload was being rejected by
+  the EDDN gateway with `400 FAIL: Schema Validation`. The transform now augments
+  `System` (not `StarSystem`) from session state when absent.
 
 ## EDSM
 

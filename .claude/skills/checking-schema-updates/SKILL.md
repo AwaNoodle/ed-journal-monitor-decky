@@ -17,6 +17,7 @@ per-endpoint contract); this skill is the mechanics for regenerating it.
 | What changed since last audit | `git log --oneline <recorded-commit>..HEAD -- schemas/` |
 | Per-schema last-modified date | `git log -1 --date=short --pretty='%ad %h' -- schemas/<file>` |
 | Dump message-level field constraints | `python3 dump_schema_fields.py <clone>/schemas` (below) |
+| Refresh pinned fixtures + re-run drift test | `cp <clone>/schemas/<file>.json tests/fixtures/eddn-schemas/`, then `PYTHONPATH=. .venv/bin/python -m pytest tests/test_eddn_allowed_fields.py -q` |
 | Capture a fresh pair | `eddn-tail -S outfitting/2` (or the schema in question), `/` to live-filter on the Software column, `e` to export |
 | Probe EDSM live | `curl -sA ed-journal-monitor-decky "https://www.edsm.net/api-system-v1/bodies?systemName=Sol"` |
 | Record the result | edit `schema-versions.md` |
@@ -93,7 +94,28 @@ any field FDev adds to the journal that we blindly pass through will eventually 
 `additionalProperties: false` - a pass-through fill of those (e.g. `SignalBatcher.add_signal()`)
 is exposed to the same risk one level down.
 
-### 4. Diff a fresh capture of our own message against a reference sender's
+### 4. Refresh the pinned schema fixtures and re-run the drift test
+
+`tests/fixtures/eddn-schemas/` vendors a copy of every strict schema this plugin emits to,
+pinned at "Last audited commit" - `src/modules/eddn_allowed_fields.py`'s `ALLOW_LISTS` is
+derived from those fixtures, not fetched live (the plugin ships stdlib-only and must never
+hit the network at runtime). If step 1 touched any file this plugin emits to, that fixture is
+now stale even before you decide whether the change affects `ALLOW_LISTS`:
+
+```bash
+cp /tmp/eddn-audit/schemas/<file>-v<N>.json tests/fixtures/eddn-schemas/<file>-v<N>.json
+PYTHONPATH=. .venv/bin/python -m pytest tests/test_eddn_allowed_fields.py -q
+```
+
+`test_eddn_allowed_fields.py` re-derives each schema's allow-list straight from the fixture
+(properties minus `$ref: #/definitions/disallowed` minus the literal `patternProperties` key)
+and asserts it equals `ALLOW_LISTS`. A failure here means the fixture refresh changed what the
+schema permits - update `src/modules/eddn_allowed_fields.py` to match (the derivation is the
+authority, never hand-edit the test to match a stale table). If step 1 found nothing new for a
+schema, refreshing its fixture anyway is harmless - the copy is byte-for-byte identical and the
+test passes as before.
+
+### 5. Diff a fresh capture of our own message against a reference sender's
 
 Proves a gap rather than merely suspecting one. This is how the `Int_PlanetApproachSuite`
 elision gap (issue tracked in `schema-versions.md`'s "in flight" section) was confirmed, not
@@ -109,7 +131,7 @@ silently while looking authoritative. It also carries another commander's relay-
 every time this step runs; never resurrect or vendor an old export.
 
 **This step needs a human at the keyboard.** `eddn-tail` is an interactive TUI with no headless
-or scripted export mode - run it, watch the stream, export by hand. Reserve step 4 for when you
+or scripted export mode - run it, watch the stream, export by hand. Reserve step 5 for when you
 need to *prove* a suspected gap, not as something to run unattended on every audit pass.
 
 To capture:
@@ -162,7 +184,7 @@ print(len(our_mods), 'vs', len(their_mods))
 "
 ```
 
-### 5. Read the README prose, not just the JSON
+### 6. Read the README prose, not just the JSON
 
 Several MUSTs exist only in a schema README's "Elisions" or "Augmentations" section and are
 invisible from the JSON alone - the JSON's `pattern`/`enum` may still *permit* a value the README
@@ -170,7 +192,7 @@ says must never be sent (e.g. `outfitting-README.md`'s `Int_PlanetApproachSuite`
 schema's module-name pattern allows it, the README forbids it). For every schema this plugin
 emits, read its `-README.md` in full, not just grep for field names.
 
-### 6. When README and JSON disagree
+### 7. When README and JSON disagree
 
 The schema JSON wins - every README says so in its own preamble. Confirmed live disagreement as
 of the 2026-08-29 audit: `commodity-README.md` still says *"You MUST remove `StationType`"*, but
@@ -180,7 +202,7 @@ last-audited commit). When you hit a case like this, check
 branch) - it's the reference sender, and shows what a conformant implementation actually does in
 practice, not just what the docs permit.
 
-### 7. Re-probe EDSM's public read endpoints
+### 8. Re-probe EDSM's public read endpoints
 
 No versioned repo exists for EDSM, so there's nothing to `git log` - the check is a live request
 compared against the assumptions recorded in `schema-versions.md`'s EDSM table. All three system
@@ -199,11 +221,13 @@ Check specifically: does `discovery` still appear per-body with no `isMapped` ke
 key and can't be probed this way - mark it `unverified-in-this-pass` in `schema-versions.md`
 rather than guessing at its current behaviour.
 
-### 8. Update schema-versions.md and file issues
+### 9. Update schema-versions.md and file issues
 
 - Bump "Last audited commit" to the clone's current `HEAD` (with its subject and author date) and
   "Audit performed" to today.
 - Update any per-schema dates that changed.
+- Confirm step 4's fixture refresh + drift-test run is reflected: note in the "Schema fixtures"
+  line at the top of the EDDN section if the pinned commit moved.
 - Update the EDSM table's "Last verified" column only for endpoints you actually re-probed.
 - File a GitHub issue for anything found and not fixed in the same session; link it from the
   "Known accepted deviations" table rather than describing the deviation twice.
@@ -214,6 +238,6 @@ rather than guessing at its current behaviour.
 |---|---|
 | `git log <recorded-commit>..HEAD` errors "unknown revision" | Clone depth too shallow to reach the recorded commit - re-clone deeper or `git fetch --unshallow` |
 | Field-dump script finds no `message` key for a schema | That schema's structure differs from the message-envelope shape (e.g. `blackmarket`, `journal`) - read it by hand instead of assuming the loop covers every file uniformly |
-| No reference-sender message showing up in `eddn-tail` for step 4 | Either the sender isn't currently active on the schema you're watching, or the live filter regex doesn't match the Software column text - widen the filter or wait longer before concluding it's absent. If you give up, note the gap as unconfirmed (suspected from README text) rather than asserting it as a real deviation |
+| No reference-sender message showing up in `eddn-tail` for step 5 | Either the sender isn't currently active on the schema you're watching, or the live filter regex doesn't match the Software column text - widen the filter or wait longer before concluding it's absent. If you give up, note the gap as unconfirmed (suspected from README text) rather than asserting it as a real deviation |
 | EDSM probe returns `{}` instead of a list/dict | For `sphere-systems`, this means the queried system isn't known to EDSM (documented behaviour, not a break) - retry with a known system like `Sol` before concluding the contract changed |
 | curl gets `403` from EDSM | User-Agent didn't match - EDSM's Cloudflare rejects the default `curl`/`urllib` UA; the `-A "ed-journal-monitor-decky"` flag above is required, not optional |
