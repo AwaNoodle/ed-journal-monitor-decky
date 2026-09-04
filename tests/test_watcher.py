@@ -847,6 +847,178 @@ class TestDedicatedSchemaRouting:
         assert message["message"]["System"] == "Sol"
 
     @pytest.mark.asyncio
+    async def test_codex_entry_populates_status_body_name_before_transform(self, watcher, tmp_path):
+        """The watcher must refresh session_state.status_body_name from
+        Status.json before the transform runs, so a fresh Status.json naming
+        the tracked body produces both BodyName and BodyID."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        watcher._journal_path = str(tmp_path)
+
+        (tmp_path / "Status.json").write_text(
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"Status","BodyName":"Earth"}',
+            encoding="utf-8",
+        )
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody","StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":1}\n'
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"CodexEntry","SystemAddress":10477373803,"Name":"$Codex_Ent_Name_1;","Region":"TestRegion","EntryID":123}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        assert watcher.parser.session_state.status_body_name == "Earth"
+
+        codex_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "CodexEntry":
+                codex_call = call
+                break
+        assert codex_call is not None
+        message = codex_call.args[0]["message"]
+        assert message["BodyName"] == "Earth"
+        assert message["BodyID"] == 1
+
+    @pytest.mark.asyncio
+    async def test_codex_entry_different_body_omits_body_id(self, watcher, tmp_path):
+        """Status.json naming a different body than the tracked journal body
+        submits BodyName only, no BodyID key -- the binary-body case."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        watcher._journal_path = str(tmp_path)
+
+        (tmp_path / "Status.json").write_text(
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"Status","BodyName":"Baliscii 7 b"}',
+            encoding="utf-8",
+        )
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody","StarSystem":"Sol",'
+            '"SystemAddress":10477373803,"Body":"Baliscii 7 a","BodyID":2}\n'
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"CodexEntry","SystemAddress":10477373803,'
+            '"Name":"$Codex_Ent_Name_1;","Region":"TestRegion","EntryID":123}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        codex_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "CodexEntry":
+                codex_call = call
+                break
+        assert codex_call is not None
+        message = codex_call.args[0]["message"]
+        assert message["BodyName"] == "Baliscii 7 b"
+        assert "BodyID" not in message
+
+    @pytest.mark.asyncio
+    async def test_codex_entry_stale_status_json_omits_body_keys(self, watcher, tmp_path):
+        """A replayed/stale codex entry (Status.json timestamp far from the
+        event's) submits without BodyName or BodyID."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        watcher._journal_path = str(tmp_path)
+
+        (tmp_path / "Status.json").write_text(
+            '{"timestamp":"2026-01-13T09:00:00Z","event":"Status","BodyName":"Earth"}',
+            encoding="utf-8",
+        )
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody","StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":1}\n'
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"CodexEntry","SystemAddress":10477373803,"Name":"$Codex_Ent_Name_1;","Region":"TestRegion","EntryID":123}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        codex_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "CodexEntry":
+                codex_call = call
+                break
+        assert codex_call is not None
+        message = codex_call.args[0]["message"]
+        assert "BodyName" not in message
+        assert "BodyID" not in message
+
+    @pytest.mark.asyncio
+    async def test_codex_entry_missing_status_json_still_submits(self, watcher, tmp_path):
+        """A reader failure (Status.json absent) must not block submission."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        watcher._journal_path = str(tmp_path)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"CodexEntry","SystemAddress":10477373803,"Name":"$Codex_Ent_Name_1;","Region":"TestRegion","EntryID":123}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        codex_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "CodexEntry":
+                codex_call = call
+                break
+        assert codex_call is not None
+        message = codex_call.args[0]["message"]
+        assert "BodyName" not in message
+        assert "BodyID" not in message
+
+    @pytest.mark.asyncio
+    async def test_non_codex_dedicated_schema_event_does_not_read_status_json(self, watcher, tmp_path, monkeypatch):
+        """Status.json must be read only for CodexEntry, not for other
+        dedicated-schema events (e.g. ApproachSettlement)."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        watcher._journal_path = str(tmp_path)
+
+        call_count = 0
+        import src.modules.watcher as watcher_mod
+
+        async def counting_read(journal_dir, event_timestamp):
+            nonlocal call_count
+            call_count += 1
+            return "Earth"
+
+        monkeypatch.setattr(watcher_mod, "read_status_body_name", counting_read)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T13:00:00Z","event":"ApproachSettlement","StarSystem":"Sol",'
+            '"SystemAddress":10477373803,"BodyID":1,"BodyName":"Earth","Name":"Some Settlement",'
+            '"MarketID":128666762,"Latitude":1.0,"Longitude":2.0}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        assert call_count == 0
+        settlement_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "ApproachSettlement":
+                settlement_call = call
+                break
+        assert settlement_call is not None
+
+    @pytest.mark.asyncio
     async def test_saa_signals_found_routes_through_journal1(self, watcher, tmp_path):
         """SAASignalsFound should go through journal/1 (it's in the journal/1 enum)."""
         watcher.submitter.submit = AsyncMock(return_value=True)

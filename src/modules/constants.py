@@ -124,3 +124,11 @@ EDDN_FACTIONS_DISALLOWED_FIELDS = {
     "SquadronFaction",
 }
 
+# Status.json (journal-directory sidecar) filename.
+STATUS_JSON_FILENAME = "Status.json"
+
+# Maximum allowed skew, in seconds, between Status.json's own timestamp and a
+# CodexEntry event's timestamp for the status-derived body name to be trusted
+# (codexentry-README.md's "BodyID and BodyName" section). See status_reader.py.
+STATUS_BODY_MAX_SKEW_SECONDS = 60
+
