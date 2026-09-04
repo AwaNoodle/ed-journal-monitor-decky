@@ -1583,6 +1583,10 @@ class TestTransformCodexEntry:
     """Tests for transform_codex_entry method."""
 
     def test_valid_event(self, validator):
+        """Issue #39: BodyID/BodyName now come only from the cross-checked
+        Status.json/journal-body-tracking pair, not straight from the
+        journal event -- so this asserts the gated output, with
+        status_body_name/journal_body_name/journal_body_id set to agree."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T15:00:00Z",
@@ -1599,7 +1603,10 @@ class TestTransformCodexEntry:
             event_type="CodexEntry",
             timestamp="2026-01-12T15:00:00Z",
         )
-        session_state = SessionState(horizons=True, odyssey=True)
+        session_state = SessionState(
+            horizons=True, odyssey=True,
+            status_body_name="Earth", journal_body_name="Earth", journal_body_id=1,
+        )
         message = validator.transform_codex_entry(event, session_state)
 
         assert message is not None
@@ -1846,6 +1853,93 @@ class TestTransformCodexEntry:
         assert payload["SystemAddress"] == 10477373803
         assert payload["timestamp"] == "2026-01-12T15:00:00Z"
         assert payload["event"] == "CodexEntry"
+
+
+class TestCodexEntryStatusBodyCrossCheck:
+    """Tests for the Status.json/journal-body cross-check gate on
+    transform_codex_entry() (issue #39), per codexentry-README.md's
+    "BodyID and BodyName" section. The gate unconditionally drops any
+    journal-supplied BodyName/BodyID, then re-adds only what the
+    cross-check proves -- see design.md."""
+
+    def _event(self, **overrides) -> ParsedEvent:
+        raw = {
+            "timestamp": "2026-01-12T15:00:00Z",
+            "event": "CodexEntry",
+            "SystemAddress": 10477373803,
+            "Name": "$Codex_Ent_Name_1;",
+            "Region": "TestRegion",
+            "EntryID": 123,
+            "System": "Sol",
+            "StarPos": [0.0, 0.0, 0.0],
+        }
+        raw.update(overrides)
+        return ParsedEvent(raw=raw, event_type="CodexEntry", timestamp="2026-01-12T15:00:00Z")
+
+    def test_status_matches_journal_body_both_keys_present(self, validator):
+        event = self._event()
+        session_state = SessionState(status_body_name="Earth", journal_body_name="Earth", journal_body_id=1)
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert payload["BodyName"] == "Earth"
+        assert payload["BodyID"] == 1
+
+    def test_status_disagrees_with_journal_body_name_only_no_id_key(self, validator):
+        """The close-orbiting binary case: Status.json names the companion the
+        player is actually near, but the tracked journal body is stale."""
+        event = self._event()
+        session_state = SessionState(status_body_name="Baliscii 7 b", journal_body_name="Baliscii 7 a",
+                                      journal_body_id=2)
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert payload["BodyName"] == "Baliscii 7 b"
+        assert "BodyID" not in payload
+
+    def test_status_set_but_no_journal_body_id_known(self, validator):
+        event = self._event()
+        session_state = SessionState(status_body_name="Earth", journal_body_name="Earth", journal_body_id=None)
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert payload["BodyName"] == "Earth"
+        assert "BodyID" not in payload
+
+    def test_no_status_body_name_neither_key_even_with_journal_values(self, validator):
+        """The journal event itself carries BodyID/BodyName, and the journal
+        body tracker agrees -- but with no status_body_name, neither key may
+        be sent (e.g. a replayed/stale codex entry)."""
+        event = self._event(BodyID=1, BodyName="Earth")
+        session_state = SessionState(status_body_name=None, journal_body_name="Earth", journal_body_id=1)
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert "BodyName" not in payload
+        assert "BodyID" not in payload
+
+    def test_journal_supplied_body_name_is_replaced_by_status_value(self, validator):
+        """The journal event's own BodyName must never leak through unverified
+        -- the message's BodyName is always the status_body_name value."""
+        event = self._event(BodyID=1, BodyName="Baliscii 7 a")
+        session_state = SessionState(status_body_name="Baliscii 7 b", journal_body_name="Baliscii 7 a",
+                                      journal_body_id=1)
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert payload["BodyName"] == "Baliscii 7 b"
+        assert "BodyID" not in payload
+
+    def test_journal_supplied_body_id_dropped_when_status_unset(self, validator):
+        event = self._event(BodyID=1, BodyName="Earth")
+        session_state = SessionState()
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert "BodyID" not in payload
+        assert "BodyName" not in payload
+
+    def test_absent_keys_never_null_or_empty(self, validator):
+        event = self._event(BodyID=1, BodyName="Earth")
+        session_state = SessionState()
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+        assert payload.get("BodyName", "sentinel-absent") == "sentinel-absent"
+        assert payload.get("BodyID", "sentinel-absent") == "sentinel-absent"
 
 
 class TestTransformCommodity:

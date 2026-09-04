@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import decky
 from src.modules.constants import AUXILIARY_FILES, DEDICATED_SCHEMA_EVENTS
+from src.modules.status_reader import read_status_body_name
 
 if TYPE_CHECKING:
     from src.modules.parser import JournalParser, ParsedEvent
@@ -296,7 +297,7 @@ class JournalWatcher:
 
         # 3. Dedicated schema events (FSSDiscoveryScan, ApproachSettlement, CodexEntry)
         if event_type in DEDICATED_SCHEMA_EVENTS:
-            await self._process_dedicated_schema_event(event)
+            await self._process_dedicated_schema_event(event, source_filepath)
             return
 
         # 4. Auxiliary file events (Market, Outfitting, Shipyard, NavRoute)
@@ -312,13 +313,19 @@ class JournalWatcher:
         message = self.validator.transform(event, self.parser.session_state)
         await self._submit(message)
 
-    async def _process_dedicated_schema_event(self, event: ParsedEvent) -> None:
+    async def _process_dedicated_schema_event(self, event: ParsedEvent, source_filepath: str | None = None) -> None:
         """Process events with dedicated EDDN schemas (not journal/1)."""
         event_type = event.event_type
         validated = self.validator.validate(event, self.parser.session_state)
         if not validated:
             decky.logger.debug(f"Event validation failed: {event_type}")
             return
+
+        # Read Status.json's current BodyName on demand, only for CodexEntry
+        # (the only schema the README ties to Status.json) -- never on every
+        # poll cycle. See design.md's "Read Status.json on demand" decision.
+        if event_type == "CodexEntry":
+            await self._refresh_status_body_name(event, source_filepath)
 
         # Dispatch to the appropriate transform method
         transform_dispatch = {
@@ -454,6 +461,27 @@ class JournalWatcher:
             return Path(source_filepath).parent / auxiliary_filename
         if self._journal_path:
             return Path(self._journal_path) / auxiliary_filename
+        return None
+
+    async def _refresh_status_body_name(self, event: ParsedEvent, source_filepath: str | None) -> None:
+        """Set session_state.status_body_name from Status.json before a
+        CodexEntry transform. read_status_body_name() never raises -- every
+        failure mode (missing file, stale timestamp, torn read exhausted)
+        resolves to None, which the transform gate treats as unavailable
+        without blocking submission of the rest of the message.
+        """
+        journal_dir = self._resolve_journal_dir(source_filepath)
+        if journal_dir is None:
+            self.parser.session_state.status_body_name = None
+            return
+        self.parser.session_state.status_body_name = await read_status_body_name(journal_dir, event.timestamp)
+
+    def _resolve_journal_dir(self, source_filepath: str | None) -> str | None:
+        """Resolve the journal directory Status.json lives in."""
+        if source_filepath:
+            return str(Path(source_filepath).parent)
+        if self._journal_path:
+            return self._journal_path
         return None
 
     def _track_file_position(self, filepath: str) -> None:

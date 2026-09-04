@@ -57,9 +57,7 @@ here, if they ever disagree.
 
 Each is filed as a GitHub issue; fix or re-accept there, not by editing this row.
 
-| Issue | Deviation |
-|---|---|
-| #39 | codexentry/1: `BodyName`/`BodyID` are forwarded straight from the journal event, without the Status.json cross-check the README mandates (no Status.json reader or body tracking exists yet); schema-legal, so the gateway accepts it — a data-quality deviation, not a rejection |
+None currently open.
 
 ### Fixed since the 2026-08-29 audit
 
@@ -126,6 +124,25 @@ realignment with the schema's own `required` list; no upstream schema change inv
 - `BodyID`/`BodyName` still pass through unchanged from the journal event when present -
   the Status.json cross-check the README also mandates for those two fields remains #39,
   untouched by this fix.
+
+Branch `fix/issue-39-codexentry-status-body`, closing #39 (codexentry/1's `BodyName`/
+`BodyID` cross-check against Status.json; no upstream schema change involved - `4ad669b`
+is still current):
+
+- `transform_codex_entry()` no longer forwards the journal event's own `BodyID`/`BodyName`.
+  A new `src/modules/status_reader.py` reads `Status.json`'s `BodyName` on demand, only
+  while a `CodexEntry` is being processed, and only when `Status.json`'s own `timestamp`
+  is within `STATUS_BODY_MAX_SKEW_SECONDS` (60s) of the event's - this timestamp-skew gate
+  (rather than a "replaying" flag) is what rejects a stale value during catch-up replay or
+  a resume-from-suspend gap.
+- `JournalParser.parse_line()` now tracks the current body (`SessionState.journal_body_name`/
+  `.journal_body_id`) from `ApproachBody`/`Location`/`CarrierJump`, clearing on
+  `LeaveBody`/`FSDJump`/`Fileheader`; `SupercruiseEntry` deliberately does not clear, per
+  the README's own exception (a player can re-descend without a fresh `ApproachBody`).
+- The message's `BodyName` now comes only from the Status.json value, and `BodyID` only
+  when it agrees with the tracked journal body name - otherwise both keys are omitted
+  entirely (never `null`/`""`), matching the README's "If you cannot properly obtain the
+  values ... then you MUST NOT include them."
 
 ## EDSM
 

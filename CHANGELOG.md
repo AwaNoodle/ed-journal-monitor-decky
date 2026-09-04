@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex-entry uploads now identify the body from the game's live status and omit body details when they can't be confirmed, instead of trusting whatever the game journal happened to report.
+
 ## [0.8.4] - 2026-09-04
 
 ### Fixed

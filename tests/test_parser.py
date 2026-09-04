@@ -173,6 +173,116 @@ class TestSessionState:
         assert parser.session_state.odyssey is None
 
 
+class TestJournalBodyTracking:
+    """Tests for ApproachBody/Location/CarrierJump/LeaveBody/FSDJump/SupercruiseEntry/
+    Fileheader body tracking in SessionState (issue #39), per
+    codexentry-README.md's "BodyID and BodyName" section."""
+
+    def test_approach_body_sets_name_and_id(self, parser):
+        line = (
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        parser.parse_line(line)
+        assert parser.session_state.journal_body_name == "Earth"
+        assert parser.session_state.journal_body_id == 3
+
+    def test_location_sets_name_and_id(self, parser):
+        line = (
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Location",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0.0,0.0,0.0],'
+            '"Body":"Sol A","BodyID":1}'
+        )
+        parser.parse_line(line)
+        assert parser.session_state.journal_body_name == "Sol A"
+        assert parser.session_state.journal_body_id == 1
+
+    def test_carrier_jump_sets_name_and_id(self, parser):
+        line = (
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"CarrierJump",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0.0,0.0,0.0],'
+            '"Body":"Sol A","BodyID":1}'
+        )
+        parser.parse_line(line)
+        assert parser.session_state.journal_body_name == "Sol A"
+        assert parser.session_state.journal_body_id == 1
+
+    def test_body_name_falls_back_when_body_key_absent(self, parser):
+        """The journal key is Body; fall back to BodyName for a future rename."""
+        line = (
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Earth","BodyID":3}'
+        )
+        parser.parse_line(line)
+        assert parser.session_state.journal_body_name == "Earth"
+        assert parser.session_state.journal_body_id == 3
+
+    def test_leave_body_clears(self, parser):
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:05:00Z","event":"LeaveBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        assert parser.session_state.journal_body_name == ""
+        assert parser.session_state.journal_body_id is None
+
+    def test_fsdjump_clears(self, parser):
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:10:00Z","event":"FSDJump",'
+            '"StarSystem":"Alpha Centauri","SystemAddress":10477373804,"StarPos":[3.0,0.0,0.0]}'
+        )
+        assert parser.session_state.journal_body_name == ""
+        assert parser.session_state.journal_body_id is None
+
+    def test_supercruise_entry_does_not_clear(self, parser):
+        """A player can re-descend to the same body without a fresh ApproachBody."""
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:03:00Z","event":"SupercruiseEntry",'
+            '"StarSystem":"Sol","SystemAddress":10477373803}'
+        )
+        assert parser.session_state.journal_body_name == "Earth"
+        assert parser.session_state.journal_body_id == 3
+
+    def test_fileheader_clears(self, parser):
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        parser.parse_line(
+            '{"timestamp":"2026-01-13T09:00:00Z","event":"Fileheader",'
+            '"gameversion":"4.0.0.1","build":"r293895/r0 "}'
+        )
+        assert parser.session_state.journal_body_name == ""
+        assert parser.session_state.journal_body_id is None
+
+    def test_event_without_body_key_leaves_state_untouched(self, parser):
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:00:00Z","event":"ApproachBody",'
+            '"StarSystem":"Sol","SystemAddress":10477373803,"Body":"Earth","BodyID":3}'
+        )
+        parser.parse_line(
+            '{"timestamp":"2026-01-12T14:02:00Z","event":"Music","MusicTrack":"Exploration"}'
+        )
+        assert parser.session_state.journal_body_name == "Earth"
+        assert parser.session_state.journal_body_id == 3
+
+    def test_default_journal_body_state(self, parser):
+        assert parser.session_state.journal_body_name == ""
+        assert parser.session_state.journal_body_id is None
+        assert parser.session_state.status_body_name is None
+
+
 class TestParseAuxiliaryFile:
     def test_parse_market_file(self, parser):
         fixture = Path(__file__).parent / "fixtures" / "Market.json"

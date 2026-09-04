@@ -471,8 +471,18 @@ class EDDNValidator:
         ``StarSystem``, so this augments ``System`` from session state when
         absent, under the same SystemAddress cross-check the other
         augmentations use.
+
+        BodyID/BodyName are gated per codexentry-README.md's "BodyID and
+        BodyName" section (issue #39): any journal-supplied values are
+        dropped unconditionally, then ``BodyName`` is re-added only from
+        ``session_state.status_body_name`` (the Status.json-derived value),
+        and ``BodyID`` only when the tracked journal body name agrees with
+        it. See design.md's "The gate drops journal-supplied values
+        unconditionally" decision.
         """
         message_payload = dict(event.raw)
+        message_payload.pop("BodyID", None)
+        message_payload.pop("BodyName", None)
 
         # Augment StarPos/System from session_state
         if "StarPos" not in message_payload and session_state.star_pos:
@@ -486,6 +496,12 @@ class EDDNValidator:
 
         # Add horizons/odyssey
         _set_horizons_odyssey(message_payload, session_state)
+
+        status_body_name = session_state.status_body_name
+        if status_body_name:
+            message_payload["BodyName"] = status_body_name
+            if session_state.journal_body_id is not None and session_state.journal_body_name == status_body_name:
+                message_payload["BodyID"] = session_state.journal_body_id
 
         message_payload = _project_allowed(message_payload, ALLOW_LISTS[EDDN_CODEXENTRY_1_SCHEMA_REF])
 
