@@ -59,7 +59,6 @@ Each is filed as a GitHub issue; fix or re-accept there, not by editing this row
 
 | Issue | Deviation |
 |---|---|
-| #38 | codexentry/1: `REQUIRED_FIELDS["CodexEntry"]` demands `BodyID`/`BodyName`, which the schema lists as optional and the README says MUST be omitted when Status.json has no body — so any codex entry logged away from a body is dropped by `validate()` before transform, with only a debug log line |
 | #39 | codexentry/1: `BodyName`/`BodyID` are forwarded straight from the journal event, without the Status.json cross-check the README mandates (no Status.json reader or body tracking exists yet); schema-legal, so the gateway accepts it — a data-quality deviation, not a rejection |
 
 ### Fixed since the 2026-08-29 audit
@@ -106,6 +105,27 @@ change involved - `4ad669b` is still current):
   this meant essentially every CodexEntry discovery upload was being rejected by
   the EDDN gateway with `400 FAIL: Schema Validation`. The transform now augments
   `System` (not `StarSystem`) from session state when absent.
+
+Branch `issue-38-codexentry-required-fields`, closing #38 (`REQUIRED_FIELDS["CodexEntry"]`
+realignment with the schema's own `required` list; no upstream schema change involved -
+`4ad669b` is still current):
+
+- `REQUIRED_FIELDS["CodexEntry"]` narrowed to `timestamp`, `SystemAddress`, `EntryID` -
+  codexentry-v1.0.json's actual `required` list, minus `event` (guaranteed by the parser
+  for every event it emits) and `StarPos`/`System` (augmented from session state, already
+  gated by `validate()`'s generic StarPos check). `Name`, `Region`, `BodyID`, `BodyName`
+  are schema-optional and no longer gate submission; any codex entry logged away from a
+  body (stellar phenomena, deep-space anomalies) was previously dropped silently before
+  transform, with only a debug log line as trace.
+- `validate()` gained a CodexEntry-specific guard: when the event has no `System` and
+  `session_state.star_system` is also unset, validation now rejects rather than letting
+  `transform_codex_entry()` build a message missing a schema-required property. Not
+  currently reachable in practice (the generic StarPos check upstream of it already
+  demands a populated `session_state`), but removes a two-independent-`if`-statements
+  coincidence in favour of one explicit guard.
+- `BodyID`/`BodyName` still pass through unchanged from the journal event when present -
+  the Status.json cross-check the README also mandates for those two fields remains #39,
+  untouched by this fix.
 
 ## EDSM
 

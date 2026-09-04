@@ -171,6 +171,29 @@ class TestCodexEntryConformance:
         message = validator.transform_codex_entry(event, session_state)
         _assert_conforms(message, EDDN_CODEXENTRY_1_SCHEMA_REF)
 
+    def test_conforms_without_body_fields(self, validator):
+        """Issue #38: a CodexEntry event logged away from a body carries neither
+        BodyID nor BodyName -- codexentry-v1.0.json requires neither, so the
+        resulting message must still validate against the real schema."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "EntryID": 123,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            horizons=True, odyssey=True,
+            star_pos=[0.0, 0.0, 0.0], system_address=10477373803, star_system="Sol",
+        )
+        message = validator.transform_codex_entry(event, session_state)
+        assert "BodyID" not in message["message"]
+        assert "BodyName" not in message["message"]
+        _assert_conforms(message, EDDN_CODEXENTRY_1_SCHEMA_REF)
+
     def test_pre_fix_star_system_payload_fails_conformance(self, validator):
         """Pins the issue #27 defect: a message built the old way (StarSystem
         instead of System) must fail schema validation. Guards against the fix

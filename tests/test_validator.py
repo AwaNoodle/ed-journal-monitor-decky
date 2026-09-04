@@ -218,11 +218,10 @@ class TestValidate:
                 "BodyCount": 21,
                 "NonBodyCount": 42,
             }),
-            ("CodexEntry", "Name", {
+            ("CodexEntry", "EntryID", {
                 "timestamp": "2026-01-12T15:00:00Z",
                 "event": "CodexEntry",
                 "Region": "TestRegion",
-                "EntryID": 123,
                 "SystemAddress": 10477373803,
             }),
         ],
@@ -292,6 +291,120 @@ class TestValidate:
         session_state = SessionState(
             star_pos=[0.0, 0.0, 0.0],
             system_address=10477373803,
+        )
+        assert validator.validate(event, session_state) is True
+
+
+class TestCodexEntryRequiredFields:
+    """Issue #38: BodyID/BodyName are optional in codexentry/1 -- validate()
+    must not require them. Regression coverage for the fix in validator.py."""
+
+    def test_valid_without_body_fields_given_matching_session_state(self, validator):
+        """The issue #38 regression test: a CodexEntry event with no BodyID and
+        no BodyName (stellar phenomena, deep-space anomalies -- anything logged
+        away from a body) must still validate when session state supplies a
+        StarPos/StarSystem for the event's SystemAddress. Fails before the fix
+        (old REQUIRED_FIELDS still lists BodyID/BodyName)."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "EntryID": 123,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is True
+
+    def test_valid_without_name_and_region(self, validator):
+        """codexentry-v1.0.json does not require Name or Region -- keeping them
+        in REQUIRED_FIELDS would preserve the exact failure mode issue #38 is
+        about. Fails before the fix (old REQUIRED_FIELDS lists Name and Region)."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "EntryID": 123,
+                "BodyID": 1,
+                "BodyName": "Earth",
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is True
+
+    @pytest.mark.parametrize("missing_field", ["EntryID", "SystemAddress", "timestamp"])
+    def test_missing_schema_required_field_rejected(self, validator, missing_field):
+        """EntryID, SystemAddress and timestamp are genuinely required by
+        codexentry/1 and must still gate validation after the fix."""
+        raw = {
+            "timestamp": "2026-01-12T15:00:00Z",
+            "event": "CodexEntry",
+            "SystemAddress": 10477373803,
+            "EntryID": 123,
+        }
+        del raw[missing_field]
+        event = ParsedEvent(raw=raw, event_type="CodexEntry", timestamp="2026-01-12T15:00:00Z")
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        assert validator.validate(event, session_state) is False
+
+    def test_missing_system_and_no_session_star_system_rejected(self, validator):
+        """codexentry/1 requires System. A real event never carries it, so it is
+        always augmented from session_state.star_system -- but if that is also
+        unavailable, validate() must reject rather than let transform build a
+        message missing a required property (see #37 for that failure class)."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "EntryID": 123,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system=None,
+        )
+        assert validator.validate(event, session_state) is False
+
+    def test_valid_with_explicit_system_and_no_session_star_system(self, validator):
+        """The §2.2 guard only bites when System is absent from both sources --
+        an event that already carries System must not be rejected for lacking
+        session_state.star_system."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "EntryID": 123,
+                "System": "Sol",
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system=None,
         )
         assert validator.validate(event, session_state) is True
 
@@ -1700,6 +1813,38 @@ class TestTransformCodexEntry:
         message = validator.transform_codex_entry(event, session_state)
 
         assert "StarSystem" not in message["message"]
+
+    def test_body_less_event_produces_message_without_body_fields(self, validator):
+        """Issue #38: a CodexEntry event logged away from a body (no BodyID, no
+        BodyName in the journal) must produce a message that omits both keys
+        entirely -- codexentry-README.md forbids sending them as null/empty
+        placeholders -- while still carrying every field the schema requires."""
+        event = ParsedEvent(
+            raw={
+                "timestamp": "2026-01-12T15:00:00Z",
+                "event": "CodexEntry",
+                "SystemAddress": 10477373803,
+                "EntryID": 123,
+            },
+            event_type="CodexEntry",
+            timestamp="2026-01-12T15:00:00Z",
+        )
+        session_state = SessionState(
+            star_pos=[0.0, 0.0, 0.0],
+            system_address=10477373803,
+            star_system="Sol",
+        )
+        message = validator.transform_codex_entry(event, session_state)
+        payload = message["message"]
+
+        assert "BodyID" not in payload
+        assert "BodyName" not in payload
+        assert payload["System"] == "Sol"
+        assert payload["StarPos"] == [0.0, 0.0, 0.0]
+        assert payload["EntryID"] == 123
+        assert payload["SystemAddress"] == 10477373803
+        assert payload["timestamp"] == "2026-01-12T15:00:00Z"
+        assert payload["event"] == "CodexEntry"
 
 
 class TestTransformCommodity:
