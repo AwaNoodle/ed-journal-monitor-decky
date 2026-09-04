@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - CodexEntry discovery uploads (new Codex entries found while exploring) are now accepted by EDDN instead of being rejected.
+- Codex entries logged away from a planet or star (stellar phenomena, deep-space anomalies) are now uploaded to EDDN instead of being silently skipped.
 
 ## [0.8.3] - 2026-09-03
 

@@ -816,6 +816,37 @@ class TestDedicatedSchemaRouting:
         assert message["$schemaRef"] == EDDN_CODEXENTRY_1_SCHEMA_REF
 
     @pytest.mark.asyncio
+    async def test_codex_entry_without_body_fields_still_submits(self, watcher, tmp_path):
+        """Issue #38: a CodexEntry line logged away from a body (no BodyID, no
+        BodyName -- stellar phenomena, deep-space anomalies) must still reach
+        submitter.submit. Before the fix, validate() drops it silently: no
+        activity-log entry, no failure counter, submit() never called."""
+        watcher.submitter.submit = AsyncMock(return_value=True)
+
+        journal_file = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal_file.write_text(
+            '{"timestamp":"2026-01-12T12:00:00Z","event":"Fileheader"}\n'
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame","Commander":"TestCmdr","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-01-12T12:05:30Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}\n'
+            '{"timestamp":"2026-01-12T15:00:00Z","event":"CodexEntry","SystemAddress":10477373803,"Name":"$Codex_Ent_Name_1;","Region":"TestRegion","EntryID":123}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._process_file(str(journal_file))
+
+        codex_call = None
+        for call in watcher.submitter.submit.await_args_list:
+            if call.kwargs.get("event_name") == "CodexEntry":
+                codex_call = call
+                break
+        assert codex_call is not None
+        message = codex_call.args[0]
+        assert message["$schemaRef"] == EDDN_CODEXENTRY_1_SCHEMA_REF
+        assert "BodyID" not in message["message"]
+        assert "BodyName" not in message["message"]
+        assert message["message"]["System"] == "Sol"
+
+    @pytest.mark.asyncio
     async def test_saa_signals_found_routes_through_journal1(self, watcher, tmp_path):
         """SAASignalsFound should go through journal/1 (it's in the journal/1 enum)."""
         watcher.submitter.submit = AsyncMock(return_value=True)

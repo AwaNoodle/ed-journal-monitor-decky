@@ -48,7 +48,7 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "CarrierJump": ["timestamp", "StarSystem", "SystemAddress", "StarPos"],
     "FSSSignalDiscovered": ["timestamp", "SystemAddress", "SignalName"],
     "SAASignalsFound": ["timestamp", "StarSystem", "SystemAddress"],
-    "CodexEntry": ["timestamp", "SystemAddress", "Name", "Region", "EntryID", "BodyID", "BodyName"],
+    "CodexEntry": ["timestamp", "SystemAddress", "EntryID"],
     "NavBeaconScan": ["timestamp", "NumBodies"],
     "FSSAllBodiesFound": ["timestamp", "SystemName", "SystemAddress", "Count"],
     "ScanBaryCentre": ["timestamp", "SystemAddress", "BodyID"],
@@ -221,6 +221,18 @@ class EDDNValidator:
 
         # ApproachSettlement requires StationName (journal) or Name (already renamed)
         if event.event_type == "ApproachSettlement" and "StationName" not in event.raw and "Name" not in event.raw:
+            return False
+
+        # codexentry/1 requires System. The journal event normally carries
+        # it, and transform_codex_entry() augments it from
+        # session_state.star_system when it does not -- but reject here when
+        # neither source can supply it, rather than let the transform build a
+        # message missing a required property.
+        if (
+            event.event_type == "CodexEntry"
+            and "System" not in event.raw
+            and (not session_state or not session_state.star_system)
+        ):
             return False
 
         # EDDN requires StarPos on most messages.
