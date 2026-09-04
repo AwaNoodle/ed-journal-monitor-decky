@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Tests for the Status.json reader (issue #39).
 
