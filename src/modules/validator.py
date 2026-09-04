@@ -223,11 +223,11 @@ class EDDNValidator:
         if event.event_type == "ApproachSettlement" and "StationName" not in event.raw and "Name" not in event.raw:
             return False
 
-        # codexentry/1 requires System. A real CodexEntry event never carries
-        # it, so transform_codex_entry() always augments it from
-        # session_state.star_system -- but if that is unavailable too, reject
-        # here rather than let the transform build a message missing a
-        # required property.
+        # codexentry/1 requires System. The journal event normally carries
+        # it, and transform_codex_entry() augments it from
+        # session_state.star_system when it does not -- but reject here when
+        # neither source can supply it, rather than let the transform build a
+        # message missing a required property.
         if (
             event.event_type == "CodexEntry"
             and "System" not in event.raw

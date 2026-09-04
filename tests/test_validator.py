@@ -365,10 +365,11 @@ class TestCodexEntryRequiredFields:
         assert validator.validate(event, session_state) is False
 
     def test_missing_system_and_no_session_star_system_rejected(self, validator):
-        """codexentry/1 requires System. A real event never carries it, so it is
-        always augmented from session_state.star_system -- but if that is also
-        unavailable, validate() must reject rather than let transform build a
-        message missing a required property (see #37 for that failure class)."""
+        """codexentry/1 requires System. The journal event normally carries it;
+        transform_codex_entry() augments it from session_state.star_system when
+        it does not -- but if neither source can supply it, validate() must
+        reject rather than let transform build a message missing a required
+        property (see #37 for that failure class)."""
         event = ParsedEvent(
             raw={
                 "timestamp": "2026-01-12T15:00:00Z",
