@@ -12,7 +12,7 @@ cycle: see design.md's "Read Status.json on demand" decision.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import decky
@@ -83,9 +83,19 @@ def _try_read(status_path: Path) -> dict | None:
 
 
 def _parse_iso_timestamp(value: object) -> datetime | None:
+    """Parse a journal/Status.json ISO timestamp as an aware datetime.
+
+    Both files write UTC (``...Z``), so a value that carries no offset is
+    read as UTC rather than left naive: subtracting a naive datetime from an
+    aware one raises ``TypeError``, which would drop the codex entry
+    entirely instead of submitting it without body keys.
+    """
     if not isinstance(value, str) or not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed

@@ -161,3 +161,30 @@ class TestReadStatusBodyName:
 
         result = await read_status_body_name(str(tmp_path), EVENT_TIMESTAMP)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_offsetless_status_timestamp_read_as_utc(self, tmp_path):
+        """A Status.json timestamp without a UTC offset must not raise.
+
+        Both files write UTC, so an offset-less value is read as UTC.
+        Subtracting it from the aware event timestamp would otherwise raise
+        TypeError and drop the codex entry instead of omitting body keys.
+        """
+        _write_status(tmp_path, {"timestamp": "2026-01-12T15:00:30", "BodyName": "Earth"})
+
+        result = await read_status_body_name(str(tmp_path), EVENT_TIMESTAMP)
+        assert result == "Earth"
+
+    @pytest.mark.asyncio
+    async def test_offsetless_status_timestamp_still_skew_gated(self, tmp_path):
+        _write_status(tmp_path, {"timestamp": "2026-01-12T13:00:00", "BodyName": "Earth"})
+
+        result = await read_status_body_name(str(tmp_path), EVENT_TIMESTAMP)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_offsetless_event_timestamp_read_as_utc(self, tmp_path):
+        _write_status(tmp_path, {"timestamp": EVENT_TIMESTAMP, "BodyName": "Earth"})
+
+        result = await read_status_body_name(str(tmp_path), "2026-01-12T15:00:00")
+        assert result == "Earth"
