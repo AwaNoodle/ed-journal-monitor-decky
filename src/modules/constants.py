@@ -132,3 +132,54 @@ STATUS_JSON_FILENAME = "Status.json"
 # (codexentry-README.md's "BodyID and BodyName" section). See status_reader.py.
 STATUS_BODY_MAX_SKEW_SECONDS = 60
 
+# --- Untrusted-input limits -------------------------------------------------
+# The watched journal directory is a user-settable path (Steam library scan
+# covers SD-card paths), so every file read out of it is untrusted input.
+# Anything that is not a plain regular file, or is implausibly large, is
+# skipped rather than read into memory on the plugin's single asyncio loop.
+
+# Largest journal file the watcher will open. ED rotates journals long before
+# this, so a bigger file is not a journal.
+MAX_JOURNAL_FILE_BYTES = 512 * 1024 * 1024
+
+# Most bytes consumed from one journal file in one poll cycle. Bounds peak
+# memory regardless of file size; any remaining tail is read on the next poll.
+JOURNAL_READ_CHUNK_BYTES = 4 * 1024 * 1024
+
+# Largest auxiliary/Status sidecar (Market.json, Outfitting.json,
+# Shipyard.json, NavRoute.json, Status.json) the parser will parse. Real
+# files are a few hundred KB.
+MAX_AUXILIARY_FILE_BYTES = 16 * 1024 * 1024
+
+# Retry rounds shared by every auxiliary read in one poll cycle. ED writes the
+# sidecar shortly after the journal line, so a few retries pay off; without a
+# shared budget, N events with a missing sidecar stall ingestion N x delay.
+MAX_AUXILIARY_RETRIES_PER_POLL = 5
+
+# Longest list `_dedupe_preserving_order` will inspect (uniqueItems arrays:
+# outfitting/2 modules, shipyard/2 ships, commodity/3 statusFlags). Real
+# arrays are tens of entries; the excess is dropped rather than deduped.
+MAX_UNIQUE_ARRAY_ITEMS = 4096
+
+# Longest accepted `Commander` value. Elite's own limit is far below this;
+# the value becomes the public EDDN uploaderID, so it is length-bounded and
+# type-checked before it reaches session state.
+MAX_COMMANDER_NAME_LENGTH = 64
+
+# --- Network response limits ------------------------------------------------
+# Response bodies are bounded even though TLS is verified: a compromised or
+# misbehaving endpoint must not be able to exhaust memory on a handheld.
+
+# Most bytes read from any HTTP response body (EDDN and EDSM, all endpoints).
+MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
+
+# Longest server-supplied message retained for logging or forwarding to the
+# frontend (EDDN error bodies, EDSM `msg` strings).
+MAX_SERVER_MESSAGE_CHARS = 500
+
+# --- EDSM lookup bounds ----------------------------------------------------
+# Per-system lookups are driven by journal arrivals, so both the in-flight
+# task count and the cache size are bounded.
+MAX_CONCURRENT_EDSM_LOOKUPS = 4
+MAX_SYSTEM_CACHE_ENTRIES = 256
+

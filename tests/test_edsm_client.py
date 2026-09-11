@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.modules.constants import MAX_HTTP_RESPONSE_BYTES, MAX_SERVER_MESSAGE_CHARS
 from src.modules.forwarders.edsm_client import (
     EDSM_DISCARD_URL,
     EDSM_JOURNAL_URL,
@@ -27,6 +28,16 @@ def _http_response(body, headers=None):
     hdrs = headers or {}
     resp.headers = hdrs
     resp.getheader = lambda name, default=None: hdrs.get(name, default)
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def _raw_response(raw: bytes):
+    """Same as ``_http_response`` but with a body that isn't valid JSON text."""
+    resp = MagicMock()
+    resp.read.return_value = raw
+    resp.getheader = lambda name, default=None: default
     resp.__enter__ = lambda s: s
     resp.__exit__ = MagicMock(return_value=False)
     return resp
@@ -67,6 +78,30 @@ class TestDiscardList:
         with patch("src.modules.forwarders.edsm_client.urllib.request.urlopen", side_effect=OSError("boom")):
             result = client.fetch_discard()
         assert result is None
+
+    def test_discard_oversized_body_returns_none(self, client):
+        """One byte over the response cap: a failed fetch, not an exception."""
+        resp = _raw_response(b"x" * (MAX_HTTP_RESPONSE_BYTES + 1))
+        with patch("src.modules.forwarders.edsm_client.urllib.request.urlopen", return_value=resp):
+            result = client.fetch_discard()
+        assert result is None
+        assert resp.read.call_args.args[0] == MAX_HTTP_RESPONSE_BYTES + 1
+
+    def test_discard_invalid_utf8_returns_none(self, client):
+        """A non-UTF-8 body must not escape as UnicodeDecodeError — the discard
+        loop relies on a return value it can retry."""
+        with patch(
+            "src.modules.forwarders.edsm_client.urllib.request.urlopen",
+            return_value=_raw_response(b"\xff\xfe not utf-8"),
+        ):
+            assert client.fetch_discard() is None
+
+    def test_discard_recursion_error_returns_none(self, client):
+        """Deeply nested JSON blows the parser's stack; that is a failed fetch too."""
+        resp = _raw_response(b"[]")
+        resp.read.side_effect = RecursionError("maximum recursion depth exceeded")
+        with patch("src.modules.forwarders.edsm_client.urllib.request.urlopen", return_value=resp):
+            assert client.fetch_discard() is None
 
 
 class TestPostJournal:
@@ -141,6 +176,22 @@ class TestPostJournal:
             resp = self._post(client)
         assert resp.ok is False
         assert resp.transient is True
+
+    def test_oversized_body_is_transient(self, client):
+        """One byte over the response cap: same retry contract as a network error."""
+        resp = _raw_response(b"x" * (MAX_HTTP_RESPONSE_BYTES + 1))
+        with patch("src.modules.forwarders.edsm_client.urllib.request.urlopen", return_value=resp):
+            result = self._post(client)
+        assert result.ok is False
+        assert result.transient is True
+        assert resp.read.call_args.args[0] == MAX_HTTP_RESPONSE_BYTES + 1
+
+    def test_server_msg_is_truncated(self, client):
+        """`msg` is server-supplied text that reaches the log and the frontend."""
+        with patch("src.modules.forwarders.edsm_client.urllib.request.urlopen") as mock_open:
+            mock_open.return_value = _http_response({"msgnum": 203, "msg": "M" * 100_000})
+            resp = self._post(client)
+        assert len(resp.msg) == MAX_SERVER_MESSAGE_CHARS
 
     def test_per_event_array_handled_defensively(self, client):
         body = {

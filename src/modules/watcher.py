@@ -9,12 +9,19 @@ import asyncio
 import contextlib
 import os
 import re
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decky
-from src.modules.constants import AUXILIARY_FILES, DEDICATED_SCHEMA_EVENTS
+from src.modules.constants import (
+    AUXILIARY_FILES,
+    DEDICATED_SCHEMA_EVENTS,
+    JOURNAL_READ_CHUNK_BYTES,
+    MAX_AUXILIARY_RETRIES_PER_POLL,
+    MAX_JOURNAL_FILE_BYTES,
+)
 from src.modules.status_reader import read_status_body_name
 
 if TYPE_CHECKING:
@@ -50,8 +57,20 @@ class JournalWatcher:
         self._journal_path: str | None = None
         self._poll_interval: int = 10  # seconds
         self._poll_task: asyncio.Task | None = None
-        self._file_positions: dict[str, int] = {}  # filepath -> last line number
+        # filepath -> byte offset of the first byte not yet dispatched
+        self._file_positions: dict[str, int] = {}
         self._known_files: set[str] = set()
+        # filepath -> reason it was last skipped, so a rejected directory entry
+        # is logged once per reason instead of once per poll.
+        self._skip_reasons: dict[str, str] = {}
+        # Retry rounds left for auxiliary reads in the current poll cycle.
+        self._auxiliary_retry_budget: int = MAX_AUXILIARY_RETRIES_PER_POLL
+        # True while start() is between its guard and its poll task, so a
+        # concurrent start() cannot run a second scan while is_running is
+        # still false; _stop_requested records a stop() that arrived in that
+        # window.
+        self._starting = False
+        self._stop_requested = False
 
     @staticmethod
     def _create_batcher() -> SignalBatcher:
@@ -60,29 +79,49 @@ class JournalWatcher:
 
     async def start(self, journal_path: str) -> None:
         """Start the polling watcher."""
-        if self.is_running:
+        if self.is_running or self._starting:
             return
 
         if not self.settings.get("enabled", True):
             decky.logger.info("Monitor is disabled, not starting watcher")
             return
 
-        self._journal_path = journal_path
-        self._poll_interval = self.settings.get("poll_interval", 10)
-        self.is_running = True
+        self._starting = True
+        self._stop_requested = False
+        try:
+            self._journal_path = journal_path
+            self._poll_interval = self.settings.get("poll_interval", 10)
 
-        # Load persisted last-active timestamp for catch-up
-        last_active = self._load_last_active()
+            # Load persisted last-active timestamp for catch-up
+            last_active = self._load_last_active()
 
-        # Initial scan: process files from catch-up or current date
-        await self._initial_scan(last_active)
+            # Initial scan: process files from catch-up or current date.
+            # A failing scan must not abort startup -- the poll loop is what
+            # keeps the plugin alive, and it can recover on the next cycle.
+            try:
+                await self._initial_scan(last_active)
+            except Exception as e:
+                decky.logger.error(f"Initial journal scan failed: {e}")
 
-        # Start periodic polling
-        self._poll_task = asyncio.create_task(self._poll_loop())
+            if self._stop_requested:
+                # stop() arrived while the scan was awaiting: honour it rather
+                # than leaving a poll loop nobody asked for.
+                decky.logger.info("Journal watcher stopped during initial scan")
+                return
+
+            # Start periodic polling. is_running only becomes true once the
+            # poll task exists, so no reader (UI status, diagnostics) can ever
+            # see "monitoring" with nothing running.
+            self._poll_task = asyncio.create_task(self._poll_loop())
+            self.is_running = True
+        finally:
+            self._starting = False
         decky.logger.info(f"Journal watcher started on {journal_path}")
 
     async def stop(self) -> None:
         """Stop the watcher and persist state."""
+        if self._starting:
+            self._stop_requested = True
         self.is_running = False
         if self._poll_task:
             self._poll_task.cancel()
@@ -107,7 +146,9 @@ class JournalWatcher:
         if not journal_dir.is_dir():
             return
 
-        log_files = sorted(journal_dir.glob("Journal*.log"))
+        self._auxiliary_retry_budget = MAX_AUXILIARY_RETRIES_PER_POLL
+
+        log_files = self._discover_log_files(journal_dir)
 
         if not log_files:
             return
@@ -121,34 +162,53 @@ class JournalWatcher:
             self._resume_consumers()
 
     async def _replay_initial_scan(self, log_files: list[Path], last_active: str | None) -> None:
-        """Replay journal files on watcher start (see _initial_scan)."""
-        for log_file in log_files:
-            if last_active:
-                # Catch-up: process files modified after last-active timestamp
-                file_mtime = datetime.fromtimestamp(log_file.stat().st_mtime, tz=timezone.utc)
-                try:
-                    last_active_dt = datetime.fromisoformat(last_active)
-                    if file_mtime < last_active_dt:
-                        # File hasn't been modified since last session, skip
-                        # But still track it for position
-                        self._track_file_position(str(log_file))
-                        continue
-                except ValueError:
-                    pass
+        """Replay journal files on watcher start (see _initial_scan).
 
-                await self._process_file(str(log_file))
-            elif log_file == log_files[-1]:
-                # First run: process ONLY the most recent file to capture
-                # Fileheader/LoadGame session state (game version, commander,
-                # horizons/odyssey). Older files' events would be stale, but
-                # the most recent file's Fileheader is essential for session
-                # state that affects all subsequent submissions (game_version,
-                # game_build, horizons, odyssey).
-                await self._process_file(str(log_file))
-            else:
-                # First run: older files are not processed, but track their
-                # position so the poll loop knows we've seen them.
+        Per-file isolation: a file that disappears mid-scan or carries an
+        out-of-range mtime is skipped, never allowed to abort startup.
+
+        A stop() that arrives while the replay is awaiting abandons the
+        remaining files: a catch-up replay is long-lived (sidecar retries, real
+        EDDN submissions), and stop_watcher/set_enabled(false) has already told
+        the user uploading has ceased.
+        """
+        newest = log_files[-1]
+        for log_file in log_files:
+            if self._stop_requested:
+                decky.logger.info("Initial scan interrupted by stop request")
+                return
+            try:
+                await self._replay_one(log_file, last_active, is_newest=log_file == newest)
+            except (OSError, ValueError, OverflowError) as e:
+                decky.logger.warning(f"Initial scan skipping {log_file.name}: {e}")
+
+    async def _replay_one(self, log_file: Path, last_active: str | None, is_newest: bool) -> None:
+        """Replay a single journal file during the initial scan."""
+        if last_active:
+            # Catch-up: process files modified after last-active timestamp
+            file_mtime = datetime.fromtimestamp(log_file.stat().st_mtime, tz=timezone.utc)
+            try:
+                last_active_dt = datetime.fromisoformat(last_active)
+            except ValueError:
+                last_active_dt = None
+            if last_active_dt is not None and file_mtime < last_active_dt:
+                # File hasn't been modified since last session, skip
+                # But still track it for position
                 self._track_file_position(str(log_file))
+                return
+            await self._process_file(str(log_file))
+        elif is_newest:
+            # First run: process ONLY the most recent file to capture
+            # Fileheader/LoadGame session state (game version, commander,
+            # horizons/odyssey). Older files' events would be stale, but
+            # the most recent file's Fileheader is essential for session
+            # state that affects all subsequent submissions (game_version,
+            # game_build, horizons, odyssey).
+            await self._process_file(str(log_file))
+        else:
+            # First run: older files are not processed, but track their
+            # position so the poll loop knows we've seen them.
+            self._track_file_position(str(log_file))
 
     async def _poll_loop(self) -> None:
         """Periodic polling loop."""
@@ -168,9 +228,9 @@ class JournalWatcher:
         if not journal_dir.is_dir():
             return
 
-        log_files = sorted(journal_dir.glob("Journal*.log"))
+        self._auxiliary_retry_budget = MAX_AUXILIARY_RETRIES_PER_POLL
 
-        for log_file in log_files:
+        for log_file in self._discover_log_files(journal_dir):
             filepath = str(log_file)
             if filepath not in self._known_files:
                 # New file detected
@@ -182,33 +242,87 @@ class JournalWatcher:
                 # Per-file isolation: one bad file must not block others
                 decky.logger.error(f"Error processing {filepath}: {e}")
 
+    def _discover_log_files(self, journal_dir: Path) -> list[Path]:
+        """Name-matched journal files that are safe to open.
+
+        The watched directory is user-settable (the Steam library scan reaches
+        removable media), so a name match alone is not enough: anything that is
+        not a regular file of plausible size is rejected before it can be
+        opened. A FIFO would otherwise block open() forever, on the single
+        asyncio loop the whole plugin runs on.
+        """
+        return [p for p in sorted(journal_dir.glob("Journal*.log")) if self._is_usable_journal(p)]
+
+    def _is_usable_journal(self, path: Path) -> bool:
+        """Stat guard: regular file (symlinks followed) within the size cap."""
+        filepath = str(path)
+        try:
+            info = path.stat()
+        except OSError as e:
+            self._log_skip(filepath, "unstattable", f"Skipping {path.name}: cannot stat it ({e})")
+            return False
+
+        if not stat.S_ISREG(info.st_mode):
+            self._log_skip(filepath, "not-regular", f"Skipping {path.name}: not a regular file")
+            return False
+
+        if info.st_size > MAX_JOURNAL_FILE_BYTES:
+            self._log_skip(
+                filepath,
+                "too-large",
+                f"Skipping {path.name}: {info.st_size} bytes exceeds the "
+                f"{MAX_JOURNAL_FILE_BYTES} byte journal limit",
+            )
+            return False
+
+        self._skip_reasons.pop(filepath, None)
+        return True
+
+    def _log_skip(self, filepath: str, reason: str, message: str) -> None:
+        """Warn about a skipped entry once per path per reason, not per poll."""
+        if self._skip_reasons.get(filepath) == reason:
+            return
+        self._skip_reasons[filepath] = reason
+        decky.logger.warning(message)
+
     async def _process_file(self, filepath: str) -> None:
         """
-        Process a journal file, reading only new lines from last position.
+        Process a journal file, reading only new bytes from the last position.
 
-        Position is updated to the end of the file even if some events
-        fail to process, to avoid duplicate submissions on the next poll.
+        The read runs in a worker thread so pathological I/O cannot wedge the
+        event loop, is capped at JOURNAL_READ_CHUNK_BYTES per poll, and yields
+        only newline-terminated lines -- a partially written trailing line is
+        left for the next poll instead of being parsed half-formed.
+
+        The stored offset advances past every byte handed to the parser even if
+        some events fail to process, to avoid duplicate submissions on the next
+        poll. A stop() requested during the initial scan abandons the rest of
+        the file for the same reason the replay loop abandons the rest of the
+        scan: one catch-up file can be large and every reportable event awaits
+        a real submission. The abandoned lines are covered by the stored offset
+        and are not re-read on the next start -- the same forward-only contract
+        a failed event already has.
         """
+        loop = asyncio.get_running_loop()
         try:
-            with Path(filepath).open(encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
+            text, new_position = await loop.run_in_executor(None, self._read_new_lines, filepath)
         except OSError as e:
             decky.logger.error(f"Failed to read {filepath}: {e}")
             return
 
-        last_position = self._file_positions.get(filepath, 0)
-        new_lines = lines[last_position:]
+        self._file_positions[filepath] = new_position
 
-        if not new_lines:
+        if not text:
             return
 
         self._known_files.add(filepath)
 
-        # Always update position to prevent reprocessing on next poll,
-        # even if some events fail to process (avoids duplicate EDDN submissions).
-        self._file_positions[filepath] = len(lines)
-
-        for line in new_lines:
+        # text always ends in the final newline consumed, so the trailing
+        # split element is the empty remainder and never a real line.
+        for line in text.split("\n")[:-1]:
+            if self._stop_requested:
+                decky.logger.info(f"Abandoning the rest of {Path(filepath).name}: stop requested")
+                return
             try:
                 event = self.parser.parse_line(line)
                 if not event:
@@ -230,6 +344,47 @@ class JournalWatcher:
                 # Per-event isolation: one bad event must not prevent
                 # processing of subsequent events in the same file.
                 decky.logger.error(f"Error processing event in {filepath}: {e}")
+
+    def _read_new_lines(self, filepath: str) -> tuple[str, int]:
+        """Read complete new lines from the stored offset. Runs in a thread.
+
+        Returns the decoded text (empty, or ending in a newline) plus the byte
+        offset to store. OSError propagates to the caller, which logs it.
+        """
+        position = self._file_positions.get(filepath, 0)
+        with Path(filepath).open("rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if size < position:
+                # Rotated or truncated in place: start over from the top.
+                decky.logger.info(
+                    f"{Path(filepath).name} shrank to {size} bytes (was at {position}), re-reading from the start"
+                )
+                position = 0
+            if size <= position:
+                return "", position
+            f.seek(position)
+            chunk = f.read(JOURNAL_READ_CHUNK_BYTES)
+
+        if not chunk:
+            return "", position
+
+        last_newline = chunk.rfind(b"\n")
+        if last_newline < 0:
+            if len(chunk) < JOURNAL_READ_CHUNK_BYTES:
+                # A line ED is still writing: leave the offset where it is and
+                # pick the line up complete on the next poll.
+                return "", position
+            # A full chunk with no line break at all is not a journal line.
+            # Discard it and move on -- never re-read the same bytes forever.
+            decky.logger.warning(
+                f"Discarding {len(chunk)} bytes without a line break in {Path(filepath).name}"
+            )
+            return "", position + len(chunk)
+
+        consumed = last_newline + 1
+        # A newline byte never occurs inside a multi-byte UTF-8 sequence, so
+        # cutting the chunk here can never split a character.
+        return chunk[:consumed].decode("utf-8", errors="replace"), position + consumed
 
     def _suspend_consumers(self) -> None:
         """Pause emit on consumers that support coalescing (e.g. session stats)."""
@@ -439,20 +594,33 @@ class JournalWatcher:
         if auxiliary_path is None:
             return None
 
-        max_attempts = 5
+        # Retries are budgeted per poll cycle, not per event: N events whose
+        # sidecar never appears must not stall ingestion N x delay. The happy
+        # path (ED finishes the write within a retry or two) is unaffected.
+        max_attempts = MAX_AUXILIARY_RETRIES_PER_POLL
         delay = 0.5  # seconds between attempts
+        attempts = 0
         for attempt in range(max_attempts):
+            attempts = attempt + 1
             data = self.parser.parse_auxiliary_file(str(auxiliary_path))
             if data is not None:
                 return data
-            if attempt < max_attempts - 1:
+            if attempt >= max_attempts - 1:
+                break
+            if self._auxiliary_retry_budget <= 0:
                 decky.logger.debug(
-                    f"Auxiliary file {auxiliary_filename} not available yet, "
-                    f"retry {attempt + 1}/{max_attempts}"
+                    f"Auxiliary file {auxiliary_filename} missing and this poll cycle's "
+                    "retry budget is spent, not waiting"
                 )
-                await asyncio.sleep(delay)
+                break
+            self._auxiliary_retry_budget -= 1
+            decky.logger.debug(
+                f"Auxiliary file {auxiliary_filename} not available yet, "
+                f"retry {attempt + 1}/{max_attempts}"
+            )
+            await asyncio.sleep(delay)
 
-        decky.logger.info(f"Auxiliary file {auxiliary_filename} still missing after {max_attempts} attempts")
+        decky.logger.info(f"Auxiliary file {auxiliary_filename} still missing after {attempts} attempts")
         return None
 
     def _resolve_auxiliary_path(self, auxiliary_filename: str, source_filepath: str | None) -> Path | None:
@@ -485,14 +653,12 @@ class JournalWatcher:
         return None
 
     def _track_file_position(self, filepath: str) -> None:
-        """Track a file's line count without processing it (for catch-up skipping)."""
+        """Track a file's byte offset without reading it (catch-up skipping)."""
         try:
-            with Path(filepath).open(encoding="utf-8", errors="replace") as f:
-                line_count = sum(1 for _ in f)
-            self._file_positions[filepath] = line_count
-            self._known_files.add(filepath)
+            self._file_positions[filepath] = Path(filepath).stat().st_size
         except OSError:
-            pass
+            return
+        self._known_files.add(filepath)
 
     def _is_from_today(self, filename: str) -> bool:
         """Check if a journal filename is from today or newer."""

@@ -5,14 +5,19 @@ Covers:
 - No duplicate for the same system (second FSDJump to same system is a no-op)
 - Disabled toggle short-circuits before any network call
 - Lookups never gate EDDN/EDSM-write (stream consumer doesn't block observe())
+- A burst of distinct arrivals holds MAX_CONCURRENT_EDSM_LOOKUPS in flight by
+  preempting the oldest, so the newest arrival still gets its verdict
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from conftest import MockSettings
 
+from src.modules.constants import MAX_CONCURRENT_EDSM_LOOKUPS
 from src.modules.edsm_lookup_consumer import EdsmLookupConsumer
 from src.modules.edsm_read_client import (
     STATUS_OK,
@@ -627,3 +632,205 @@ class TestNotifyDecision:
 
         _event_name, payload = mock_emit.call_args.args
         assert payload["notify"] is False
+
+
+class _BlockingReadClient:
+    """Read client whose calls block until released; records calls thread-safely."""
+
+    def __init__(self) -> None:
+        self._release = threading.Event()
+        self._lock = threading.Lock()
+        self.bodies_calls: list[str] = []
+        self.value_calls: list[str] = []
+
+    def release(self) -> None:
+        self._release.set()
+
+    def get_system_bodies(self, system_name: str) -> SystemBodiesResult:
+        with self._lock:
+            self.bodies_calls.append(system_name)
+        self._release.wait(timeout=5)
+        return SystemBodiesResult(status=STATUS_UNKNOWN, system_name=system_name)
+
+    def get_estimated_value(self, system_name: str) -> SystemValueResult:
+        with self._lock:
+            self.value_calls.append(system_name)
+        self._release.wait(timeout=5)
+        return SystemValueResult(status=STATUS_UNKNOWN, system_name=system_name)
+
+
+class TestConcurrencyCap:
+    """A journal full of distinct StarSystem values must not fan out unbounded."""
+
+    def _consumer(self, client) -> EdsmLookupConsumer:
+        settings = MockSettings(initial_data={"edsm_lookups_enabled": True})
+        return EdsmLookupConsumer(settings=settings, read_client=client)
+
+    @staticmethod
+    def _emitted_systems(mock_emit) -> list[str]:
+        return [call.args[1]["system"] for call in mock_emit.call_args_list]
+
+    @pytest.mark.asyncio
+    async def test_burst_past_the_cap_delivers_a_verdict_for_the_newest_system(self):
+        """Past the cap the oldest lookup is preempted, so the newest arrival still wins.
+
+        Dropping the newest arrival instead left the panel with no verdict at
+        all: the dedup key named the dropped system, so the staleness guard
+        discarded every older in-flight result.
+        """
+        client = _BlockingReadClient()
+        consumer = self._consumer(client)
+
+        burst = MAX_CONCURRENT_EDSM_LOOKUPS * 3
+        preempted: list[asyncio.Task] = []
+        for i in range(burst):
+            name = f"System {i}"
+            before = set(consumer._lookup_tasks)
+            consumer.observe(_event("FSDJump", name), _session(name))
+            assert len(consumer._lookup_tasks) <= MAX_CONCURRENT_EDSM_LOOKUPS
+            preempted.extend(before - set(consumer._lookup_tasks))
+
+        newest = f"System {burst - 1}"
+        tasks = list(consumer._lookup_tasks)
+        assert len(tasks) == MAX_CONCURRENT_EDSM_LOOKUPS
+        assert len(preempted) == burst - MAX_CONCURRENT_EDSM_LOOKUPS
+
+        client.release()
+        with patch(
+            "src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock,
+        ) as mock_emit:
+            await asyncio.gather(*tasks, *preempted, return_exceptions=True)
+
+        # Exactly one verdict, for the system the player is actually in.
+        assert self._emitted_systems(mock_emit) == [newest]
+        assert all(task.cancelled() for task in preempted)
+        # Preempted lookups issued no request and hold no slot.
+        assert set(client.bodies_calls) == {
+            f"System {i}" for i in range(burst - MAX_CONCURRENT_EDSM_LOOKUPS, burst)
+        }
+        assert len(client.value_calls) == MAX_CONCURRENT_EDSM_LOOKUPS
+        assert consumer._lookup_tasks == {}  # cleared once complete
+
+    @pytest.mark.asyncio
+    async def test_preempted_in_flight_lookup_emits_nothing(self):
+        """A lookup preempted after its request started is cancelled and stays silent."""
+        client = _BlockingReadClient()
+        consumer = self._consumer(client)
+
+        consumer.observe(_event("FSDJump", "Old"), _session("Old"))
+        oldest = next(iter(consumer._lookup_tasks))
+        for _ in range(200):  # let it reach the (blocking) read client
+            if client.bodies_calls:
+                break
+            await asyncio.sleep(0.005)
+        assert client.bodies_calls == ["Old"]
+
+        for i in range(MAX_CONCURRENT_EDSM_LOOKUPS):
+            name = f"Filler {i}"
+            consumer.observe(_event("FSDJump", name), _session(name))
+
+        assert oldest not in consumer._lookup_tasks  # slot released at preemption
+        assert len(consumer._lookup_tasks) == MAX_CONCURRENT_EDSM_LOOKUPS
+
+        client.release()
+        with patch(
+            "src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock,
+        ) as mock_emit:
+            await asyncio.gather(
+                *list(consumer._lookup_tasks), oldest, return_exceptions=True,
+            )
+
+        assert oldest.cancelled()
+        assert "Old" not in self._emitted_systems(mock_emit)
+
+    @pytest.mark.asyncio
+    async def test_force_lookup_past_the_cap_still_runs(self):
+        """Re-enabling lookups while the cap is full must not silently no-op."""
+        client = _BlockingReadClient()
+        consumer = self._consumer(client)
+        for i in range(MAX_CONCURRENT_EDSM_LOOKUPS):
+            name = f"System {i}"
+            consumer.observe(_event("FSDJump", name), _session(name))
+
+        consumer.force_lookup("Requested")
+
+        tasks = list(consumer._lookup_tasks)
+        assert len(tasks) == MAX_CONCURRENT_EDSM_LOOKUPS
+
+        client.release()
+        with patch(
+            "src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock,
+        ) as mock_emit:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        assert "Requested" in client.bodies_calls
+        assert self._emitted_systems(mock_emit) == ["Requested"]
+
+    @pytest.mark.asyncio
+    async def test_slot_frees_up_after_a_lookup_completes(self):
+        """The cap is on concurrency, not on a session's total lookup count."""
+        client = _BlockingReadClient()
+        client.release()  # complete immediately
+        consumer = self._consumer(client)
+
+        with patch("src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock):
+            for i in range(MAX_CONCURRENT_EDSM_LOOKUPS + 2):
+                name = f"System {i}"
+                consumer.observe(_event("FSDJump", name), _session(name))
+                await asyncio.gather(*list(consumer._lookup_tasks))
+
+        assert len(client.bodies_calls) == MAX_CONCURRENT_EDSM_LOOKUPS + 2
+
+    @pytest.mark.asyncio
+    async def test_session_stop_cancels_tracked_lookups_and_frees_slots(self):
+        client = _BlockingReadClient()
+        consumer = self._consumer(client)
+        for i in range(MAX_CONCURRENT_EDSM_LOOKUPS):
+            name = f"System {i}"
+            consumer.observe(_event("FSDJump", name), _session(name))
+        tasks = list(consumer._lookup_tasks)
+
+        consumer.on_session_stop()
+
+        assert consumer._lookup_tasks == {}
+        await asyncio.gather(*tasks, return_exceptions=True)
+        assert all(task.cancelled() for task in tasks)
+
+        # A fresh session can fire lookups again — stopped tasks hold no slots.
+        consumer.observe(_event("FSDJump", "Colonia"), _session("Colonia"))
+        assert len(consumer._lookup_tasks) == 1
+        consumer.on_session_stop()
+
+
+class TestSingleArrivalPayload:
+    @pytest.mark.asyncio
+    async def test_normal_arrival_emits_the_full_verdict_payload(self, mock_read_client):
+        """The capped path must leave an ordinary single arrival byte-for-byte unchanged."""
+        mock_read_client.get_estimated_value.return_value = SystemValueResult(
+            status=STATUS_OK,
+            system_name="Sol",
+            total_value=1500,
+            valuable_bodies=[{"bodyId": 1, "bodyName": "Earth", "valueMax": 900}],
+        )
+        settings = MockSettings(initial_data={
+            "edsm_lookups_enabled": True,
+            "edsm_notifications_enabled": True,
+        })
+        consumer = EdsmLookupConsumer(settings=settings, read_client=mock_read_client)
+
+        with patch(
+            "src.modules.edsm_lookup_consumer.decky.emit", new_callable=AsyncMock,
+        ) as mock_emit:
+            consumer.observe(_event("FSDJump", "Sol"), _session("Sol"))
+            await asyncio.gather(*list(consumer._lookup_tasks))
+
+        event_name, payload = mock_emit.call_args.args
+        assert event_name == "edsm_worth_scanning"
+        assert payload == {
+            "system": "Sol",
+            "verdict": "green",
+            "source": "edsm",
+            "notify": True,
+            "totalValue": 1500,
+            "priorityBodies": [{"name": "Earth", "value": 900}],
+        }

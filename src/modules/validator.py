@@ -7,6 +7,7 @@ Validates journal events against EDDN schema requirements.
 
 from typing import TYPE_CHECKING, ClassVar
 
+import decky
 from src.modules.constants import (
     EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF,
     EDDN_CODEXENTRY_1_SCHEMA_REF,
@@ -27,6 +28,7 @@ from src.modules.constants import (
     EDDN_SCANBARYCENTRE_1_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
     JOURNAL_1_ONLY_DISALLOWED,
+    MAX_UNIQUE_ARRAY_ITEMS,
 )
 from src.modules.eddn_allowed_fields import ALLOW_LISTS, SchemaAllowList
 
@@ -142,29 +144,63 @@ def _sanitize_eddn_name(name: str) -> str:
 
 
 def _dedupe_preserving_order(names: list) -> list:
-    """Drop repeated entries from a list, keeping first-seen order.
+    """Reduce a JSON array to its unique, non-empty string entries, first-seen order.
 
-    Several EDDN schemas declare ``uniqueItems`` on their name arrays
-    (outfitting/2 ``modules``, shipyard/2 ``ships``, commodity/3
-    ``statusFlags``).  The journal can legitimately repeat a name -- Elite
-    lists a module once per purchase currency, for example -- and those
-    entries are indistinguishable once reduced to the name EDDN carries.
-    Sending the duplicates makes the gateway accept the message but flag it
-    as a warning, so collapse them here.
+    Contract: the input is untrusted JSON; the output is a list of unique
+    ``str`` values in first-seen order, at most ``MAX_UNIQUE_ARRAY_ITEMS``
+    long.  The cap bounds the *output*: every entry is scanned until that
+    many unique values have been accepted, so an array of duplicates
+    collapses to all of its unique values rather than to however many
+    happened to fall inside a slice of the input.  Membership is a
+    ``set`` lookup, which keeps the whole function strictly O(n) in the
+    number of entries scanned -- it runs synchronously inside the
+    watcher's awaited poll chain, so it must never be able to stall it.
+    (The earlier version fell back to a linear scan of the accepted
+    output for unhashable entries, which a crafted Market.json full of
+    them turned into O(n^2).)
+
+    Non-string entries are dropped, and so are empty and whitespace-only
+    strings.  Nothing legitimate is lost: all three ``uniqueItems`` arrays
+    this serves -- outfitting/2 ``modules``, shipyard/2 ``ships``,
+    commodity/3 ``statusFlags`` -- declare ``items.minLength: 1``, so ""
+    fails the schema outright, and outfitting/2 additionally pins
+    ``items.pattern`` to ``(^Hpt_|^hpt_|^Int_|^int_|_Armour_|_armour_)``,
+    which no whitespace-only value can satisfy.  All three carry ED
+    symbolic names, which never consist of whitespace; a single bad entry
+    would have the gateway reject the entire message, so drop it here.
+
+    The journal can legitimately repeat a name -- Elite lists a module once
+    per purchase currency, for example -- and those entries are
+    indistinguishable once reduced to the name EDDN carries.  Sending the
+    duplicates makes the gateway accept the message but flag it as a
+    warning, so collapse them here.
     """
     seen: set = set()
     unique: list = []
+    dropped = 0
+    scanned = 0
     for name in names:
-        try:
-            if name in seen:
-                continue
-            seen.add(name)
-        except TypeError:
-            # Non-hashable entry from a malformed journal. EDDN will reject
-            # it on its own merits; crashing here would drop the whole batch.
-            if name in unique:
-                continue
+        if len(unique) >= MAX_UNIQUE_ARRAY_ITEMS:
+            break
+        scanned += 1
+        if not isinstance(name, str) or not name or name.isspace():
+            dropped += 1
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
         unique.append(name)
+
+    if dropped:
+        decky.logger.debug(
+            f"Dropped {dropped} non-string or blank entries from a uniqueItems array"
+        )
+    ignored = len(names) - scanned
+    if ignored > 0:
+        decky.logger.debug(
+            f"uniqueItems array had {len(names)} entries; ignored {ignored} "
+            f"past the {MAX_UNIQUE_ARRAY_ITEMS} unique-entry cap"
+        )
     return unique
 
 
@@ -547,10 +583,16 @@ class EDDNValidator:
                 "demandBracket": demand_bracket,
             }
 
-            # Include statusFlags if present (e.g. ["powerplay"])
+            # Include statusFlags if present (e.g. ["powerplay"]). commodity/3
+            # declares minItems: 1 on it, so a list left empty by the dedupe
+            # (which drops non-strings and blanks -- items.minLength is 1) is
+            # omitted rather than sent as [] -- an empty array would fail the
+            # whole message at the gateway.
             status_flags = item.get("StatusFlags")
             if status_flags and isinstance(status_flags, list):
-                commodity["statusFlags"] = _dedupe_preserving_order(status_flags)
+                deduped_flags = _dedupe_preserving_order(status_flags)
+                if deduped_flags:
+                    commodity["statusFlags"] = deduped_flags
 
             commodities.append(commodity)
 

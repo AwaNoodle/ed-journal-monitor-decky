@@ -106,6 +106,50 @@ npm run lint:ts
 npm run lint:py
 ```
 
+### VS Code tasks (Steam Deck deploy scaffolding)
+
+The `.vscode/` tasks deploy a CLI-built zip to a device over SSH. Settings live in
+`.vscode/settings.json`, created from `.vscode/defsettings.json` by `.vscode/config.sh`
+on first run (`settingscheck` task) and gitignored thereafter.
+
+- **No stored password.** `settings.json` holds no sudo-password key at all. Every privileged
+  remote command runs through `.vscode/deploy.sh`, which uses `ssh -t` so `sudo`
+  prompts interactively in the task terminal. Nothing is passed via `echo <password> | sudo -S`,
+  so no secret reaches `/proc/<pid>/cmdline`, task output, or shell scrollback.
+  *Better long-term option:* add a sudoers rule on the device for just the deploy
+  commands, e.g. a `/etc/sudoers.d/decky-deploy` entry granting the `deck` user
+  `NOPASSWD` on `/usr/bin/mkdir`, `/usr/bin/chown`, `/usr/bin/bsdtar` and
+  `/usr/bin/systemctl restart plugin_loader` — scoped commands, never blanket
+  `NOPASSWD: ALL` — and the prompts disappear entirely.
+- **No shell splicing of settings.** The deploy tasks pass every `${config:*}` value to
+  `.vscode/deploy.sh` through the task **environment** (`DECK_USER`, `DECK_IP`,
+  `DECK_PORT`, `DECK_DIR`, `PLUGIN_NAME`, `DECK_KEY`), never inside the command
+  string. That distinction matters: VS Code substitutes `${config:*}` as raw text, so
+  a value spliced into a `command` would be parsed by your *local* shell before any
+  script could check it — one `'` or `$(` in `settings.json` would execute on your
+  workstation. Environment values are not re-parsed, so `deploy.sh`'s validation is
+  the first and only gate: `deckuser`/`deckip`/`pluginname` against `[A-Za-z0-9._-]+`,
+  `deckport` numeric, `deckdir` an absolute path, and it fails loudly rather than
+  rewriting bad input. `deckkey` is split into ssh flags inside the script (not by a
+  shell), each word validated, with `ProxyCommand`/`LocalCommand` rejected because
+  they hand a string to a shell; a leading `~/` is expanded for you. The
+  multi-command remote block lives in the checked-in `.vscode/deploy-remote.sh`,
+  copied to the device and invoked with positional arguments, so no config value is
+  ever concatenated into a command string on either side. `pluginname` must match the
+  basename of the zip in `out/` and contain no spaces — rename the built zip if the
+  CLI emits one with spaces.
+- **`depsetup` installs pnpm via `corepack`** (or points at your distro's package
+  manager) instead of piping `https://get.pnpm.io/install.sh` into a shell.
+- **The Decky CLI is pinned and verified.** `.vscode/setup.sh` downloads Decky CLI
+  **0.0.8** from `releases/download/0.0.8/` (never the mutable `releases/latest/`),
+  checks the artifact's SHA-256 against a digest embedded in the script, and only
+  then makes it executable. A mismatch, a missing checksum tool, or an unsupported
+  platform aborts with a non-zero exit — both scripts run under `set -euo pipefail`.
+  To bump the CLI: change `DECKY_CLI_VERSION` and recompute every digest with the
+  `curl … | sha256sum` loop documented at the top of the script.
+- **`cli-build` runs the CLI under plain `sudo`,** not `sudo -E`, so the build does
+  not inherit the caller's environment; it fails fast if the verified CLI is absent.
+
 ### Deployment
 
 - **Package:** `npm run package` → produces `ed-journal-monitor.zip`

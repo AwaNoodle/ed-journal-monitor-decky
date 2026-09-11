@@ -13,7 +13,9 @@ It is independent of, and isolated from, the EDDN submission path:
 Behavior: API-key presence is the consent gate (off by default); Legacy game
 versions are not forwarded; events on EDSM's discard list are dropped; accepted
 events are buffered in journal order and flushed on a size or time threshold and
-forced-flushed on session stop. Responses are classified by ``msgnum``
+forced-flushed on session stop. Flushes are serialised, so batches reach EDSM in
+journal order even though each POST runs off the loop; a caller about to lose the
+loop (plugin unload) awaits ``drain()``. Responses are classified by ``msgnum``
 (1xx OK · 2xx fatal/no-retry · 5xx transient/retry).
 """
 
@@ -87,6 +89,8 @@ class EdsmForwarder:
         self._timer_task: asyncio.Task | None = None
         self._discard_task: asyncio.Task | None = None
         self._flush_tasks: set[asyncio.Task] = set()
+        # Serialises the send path (see `flush`).
+        self._flush_lock = asyncio.Lock()
 
     # --- StreamConsumer protocol ---
 
@@ -132,13 +136,48 @@ class EdsmForwarder:
             self._start_discard_fetch()
             self._start_timer()
 
+    def disarm(self) -> None:
+        """Withdraw consent mid-session: stop forwarding and drop what is buffered.
+
+        Unlike `on_session_start()` (which re-reads the key and rebuilds the
+        session) this leaves the panel's counters and the cached discard list
+        alone — clearing an API key is not a new session, so the session's
+        success/failure totals must survive it. Batches already on the wire are
+        left to settle: cancelling them would abandon a POST that the worker
+        thread is going to make anyway, uncounted and unlogged.
+        """
+        self._active = False
+        self._buffer = []
+        self._cancel_tasks()
+
     def on_session_stop(self) -> None:
-        """Watcher stopped: stop timers and force a final (synchronous) flush."""
+        """Watcher stopped: stop timers and force a final flush.
+
+        This hook is synchronous but is called from a coroutine on the plugin's
+        only event loop, so it cannot await and must not block: the final POST
+        is scheduled as a tracked task that offloads the blocking request to a
+        worker thread. Callers about to lose the loop (plugin unload) must
+        `await drain()` afterwards. Without a running loop (nothing to freeze,
+        nothing to schedule on) the POST is made inline instead.
+        """
         self._active = False
         self._cancel_tasks()
-        if self._buffer:
-            batch, self._buffer = self._buffer, []
+        if not self._buffer:
+            return
+        batch, self._buffer = self._buffer, []
+        if not self._track(self._final_flush(batch)):
             self._post_batch(batch)
+
+    async def drain(self) -> None:
+        """Await every in-flight flush and activity-log task.
+
+        Plugin unload is the one path that takes the event loop away, so a
+        scheduled final flush would die unsent there. Re-checked in a loop
+        because a drained flush schedules activity-log tasks of its own. Never
+        holds `_flush_lock`, so it cannot deadlock against the flush it awaits.
+        """
+        while self._flush_tasks:
+            await asyncio.gather(*self._flush_tasks, return_exceptions=True)
 
     def get_stats(self) -> dict:
         """Snapshot of this target's stats for per-target aggregation."""
@@ -154,46 +193,91 @@ class EdsmForwarder:
     # --- flush ---
 
     async def flush(self) -> None:
-        """Flush the buffer to EDSM. Re-queues events on transient failure."""
-        if not self._buffer:
-            return
-        # Gate concurrent flushes during a rate-limit backoff window: events stay
-        # buffered and the timer loop retries once the window elapses.
-        if time.monotonic() < self._rate_limited_until:
-            return
-        batch, self._buffer = self._buffer, []
-        response = self._post_batch(batch)
-        if response is not None:
-            wait = rate_limit_wait_seconds(response)
-            if wait > 0:
-                decky.logger.info(f"EDSM rate limit reached, backing off {wait:.0f}s")
-                self._rate_limited_until = time.monotonic() + wait
+        """Flush the buffer to EDSM. Re-queues events on transient failure.
 
-    def _post_batch(self, batch: list[dict]) -> EdsmResponse | None:
-        """POST one batch and apply the response. Never raises."""
+        Serialised on `_flush_lock`, which is held across the buffer swap, the
+        rate-limit gate and the send. The POST itself is offloaded to a worker
+        thread, so without the lock a second flush (size threshold, timer or
+        session stop) would swap the next buffer and POST concurrently: batches
+        could reach EDSM out of journal order, and the gate below would be read
+        before the in-flight batch had a chance to open a backoff window, so we
+        would keep POSTing through a 429.
+        """
+        async with self._flush_lock:
+            if not self._buffer:
+                return
+            # Gate flushes during a rate-limit backoff window: events stay
+            # buffered and the timer loop retries once the window elapses.
+            if time.monotonic() < self._rate_limited_until:
+                return
+            batch, self._buffer = self._buffer, []
+            response = await self._post_batch_async(batch)
+            if response is not None:
+                wait = rate_limit_wait_seconds(response)
+                if wait > 0:
+                    decky.logger.info(f"EDSM rate limit reached, backing off {wait:.0f}s")
+                    self._rate_limited_until = time.monotonic() + wait
+
+    async def _final_flush(self, batch: list[dict]) -> None:
+        """POST the batch `on_session_stop()` took, behind the same lock as
+        `flush()` so the final batch cannot overtake a flush already on the wire."""
+        async with self._flush_lock:
+            await self._post_batch_async(batch)
+
+    async def _post_batch_async(self, batch: list[dict]) -> EdsmResponse | None:
+        """POST one batch off the event loop and apply the response on it.
+
+        The client is blocking stdlib ``urllib`` with a 20s timeout; running it
+        inline would freeze journal watching, EDDN submission and Decky RPC for
+        the whole call. Only the request is offloaded — the response is applied
+        on the loop, where the activity-log tasks it schedules belong.
+        """
+        loop = asyncio.get_running_loop()
         try:
-            response = self._client.post_journal(
-                commander_name=str(self.settings.get("edsm_commander_name", "")),
-                api_key=self._api_key(),
-                software=constants.SOFTWARE_NAME,
-                software_version=str(self.settings.get("software_version", constants.SOFTWARE_VERSION)),
-                game_version=self._game_version,
-                game_build=self._game_build,
-                messages=batch,
-            )
+            response = await loop.run_in_executor(None, self._post_journal, batch)
         except Exception as e:
-            decky.logger.error(f"EDSM POST error: {e}")
-            self._fail_count += len(batch)
-            self._last_msg = str(e)
-            self._notify_stats()
+            self._record_post_error(e, batch)
             return None
 
         self._handle_response(response, batch)
         return response
 
+    def _post_batch(self, batch: list[dict]) -> EdsmResponse | None:
+        """POST one batch inline, blocking the caller. Never raises.
+
+        Only used when there is no running loop to offload to.
+        """
+        try:
+            response = self._post_journal(batch)
+        except Exception as e:
+            self._record_post_error(e, batch)
+            return None
+
+        self._handle_response(response, batch)
+        return response
+
+    def _post_journal(self, batch: list[dict]) -> EdsmResponse:
+        """The blocking request itself — the only part run off the loop."""
+        return self._client.post_journal(
+            commander_name=str(self.settings.get("edsm_commander_name", "")),
+            api_key=self._api_key(),
+            software=constants.SOFTWARE_NAME,
+            software_version=str(self.settings.get("software_version", constants.SOFTWARE_VERSION)),
+            game_version=self._game_version,
+            game_build=self._game_build,
+            messages=batch,
+        )
+
+    def _record_post_error(self, error: Exception, batch: list[dict]) -> None:
+        decky.logger.error(f"EDSM POST error: {error}")
+        self._fail_count += len(batch)
+        self._last_msg = str(error)[:constants.MAX_SERVER_MESSAGE_CHARS]
+        self._notify_stats()
+
     def _handle_response(self, response: EdsmResponse, batch: list[dict]) -> None:
         self._last_msgnum = response.msgnum
-        self._last_msg = response.msg or self._last_msg
+        # Bound server-supplied text: `_last_msg` is surfaced to the frontend.
+        self._last_msg = response.msg[:constants.MAX_SERVER_MESSAGE_CHARS] or self._last_msg
         if response.ok:
             # Terminal success: count and record one activity entry per event.
             self._success_count += len(batch)
@@ -222,27 +306,32 @@ class EdsmForwarder:
 
     def _record_success(self, event_type: str) -> None:
         if self._activity_log is not None:
-            self._schedule_coro(self._activity_log.record_success(event_type, target=constants.TARGET_EDSM))
+            self._track(self._activity_log.record_success(event_type, target=constants.TARGET_EDSM))
 
     def _record_failure(self, event_type: str, message: str) -> None:
         if self._activity_log is not None:
-            self._schedule_coro(
+            self._track(
                 self._activity_log.record_failure(
                     event_type, constants.TARGET_EDSM, message, target=constants.TARGET_EDSM,
                 )
             )
 
-    def _schedule_coro(self, coro: Coroutine[Any, Any, None]) -> None:
-        """Fire-and-forget an activity-log coroutine (recording must not block
-        or gate the flush path)."""
+    def _track(self, coro: Coroutine[Any, Any, Any]) -> bool:
+        """Schedule a coroutine as a tracked task so `drain()` can await it.
+
+        Used for the send path and for fire-and-forget activity-log records
+        (recording must not block or gate a flush). Returns False, having
+        discarded the coroutine, when there is no running loop to schedule on.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             coro.close()
-            return
+            return False
         task = loop.create_task(coro)
         self._flush_tasks.add(task)
         task.add_done_callback(self._flush_tasks.discard)
+        return True
 
     # --- background tasks ---
 
@@ -270,27 +359,30 @@ class EdsmForwarder:
 
     async def _discard_loop(self) -> None:
         backoff = self._discard_retry_interval
+        loop = asyncio.get_running_loop()
         try:
             while self._active and self._discard is None:
-                result = self._client.fetch_discard()
-                if result is not None:
-                    self._discard = result
-                    decky.logger.info(f"EDSM discard list cached ({len(result)} events)")
-                    return
-                decky.logger.warning("EDSM discard list unavailable; EDSM idle until fetched")
+                try:
+                    # Blocking stdlib GET — keep it off the loop.
+                    result = await loop.run_in_executor(None, self._client.fetch_discard)
+                    if result is not None:
+                        self._discard = result
+                        decky.logger.info(f"EDSM discard list cached ({len(result)} events)")
+                        return
+                    decky.logger.warning("EDSM discard list unavailable; EDSM idle until fetched")
+                except Exception as e:
+                    # A bad response must not kill this task: without it
+                    # `_discard` stays None and every event is dropped for the
+                    # rest of the session. CancelledError is a BaseException,
+                    # so cancellation still unwinds to the guard below.
+                    decky.logger.warning(f"EDSM discard fetch error; retrying: {e}")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, MAX_DISCARD_RETRY)
         except asyncio.CancelledError:
             pass
 
     def _schedule_flush(self) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        task = loop.create_task(self.flush())
-        self._flush_tasks.add(task)
-        task.add_done_callback(self._flush_tasks.discard)
+        self._track(self.flush())
 
     def _cancel_tasks(self) -> None:
         for task in (self._timer_task, self._discard_task):

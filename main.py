@@ -148,6 +148,11 @@ class Plugin:
         if self.watcher and self.watcher.is_running:
             await self.watcher.stop()
             self._notify_consumers_session_stop()
+            if self.edsm is not None:
+                # The forced final flush is a task on this loop: unload is about
+                # to take the loop away, so without awaiting it the buffered
+                # batch is lost with nothing left to retry.
+                await self.edsm.drain()
         decky.logger.info("ED Journal Monitor unloaded")
 
     async def _uninstall(self) -> None:
@@ -246,6 +251,26 @@ class Plugin:
             await self.settings.set("edsm_api_key", api_key)
         if self.ed_running and self.edsm is not None:
             self.edsm.on_session_start()
+            await decky.emit("status_update", self._build_target_stats())
+        return {"success": True}
+
+    async def clear_edsm_credentials(self) -> dict:
+        """Remove the saved EDSM commander name and API key.
+
+        The API key's presence is the consent gate for identifiable EDSM
+        uploads, so withdrawing consent must be possible in-product — and must
+        not be reported as done unless it reached disk, since a key still in
+        settings.json re-arms the forwarder on the next plugin load. The
+        forwarder is disarmed directly rather than through on_session_start(),
+        which would also reset the panel's EDSM counters mid-session.
+        """
+        persisted = await self.settings.delete("edsm_api_key")
+        persisted = await self.settings.delete("edsm_commander_name") and persisted
+        if not persisted:
+            decky.logger.error("EDSM credentials could not be cleared from disk")
+            return {"success": False, "error": "could not persist settings"}
+        if self.ed_running and self.edsm is not None:
+            self.edsm.disarm()
             await decky.emit("status_update", self._build_target_stats())
         return {"success": True}
 

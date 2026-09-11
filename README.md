@@ -128,9 +128,15 @@ Under **Setup ▸ EDSM account**, enter your commander name as registered on EDS
 
 It is fully isolated from EDDN - bad EDSM credentials surface as a "check your EDSM credentials" message and never affect EDDN submission, or vice versa. Only the Live game version is forwarded. Note that this key is only needed for forwarding; the EDSM lookups above work without one.
 
+The key is masked as you type it, stored with owner-only file permissions, and never included in a diagnostic bundle. To withdraw consent, use **Clear EDSM Credentials** in the same section - it erases the stored key and commander name and stops forwarding straight away, without waiting for the next game session.
+
 ### Optional: detailed logging
 
 The **Detailed Logging** toggle in the panel's **Troubleshooting** section switches log verbosity from INFO to DEBUG for richer diagnostic output. Persists across restarts.
+
+### Diagnostic bundle
+
+The bundle built by **Troubleshooting ▸ Create Diagnostic Bundle** is safe to attach to a bug report: your EDSM API key is replaced with `<redacted>`, and your home directory is shortened to `~` so the bundle does not carry your username.
 
 ## Troubleshooting
 

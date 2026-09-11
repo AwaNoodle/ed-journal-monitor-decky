@@ -7,14 +7,19 @@ Covers:
 - Scoopability survives an EDSM lookup failure (verdict/value neutral, chip kept)
 - Non-blocking: observe()/on_nav_route() never raise
 - Preview advances after a jump
+- Re-plotted routes hold MAX_CONCURRENT_EDSM_LOOKUPS hop lookups in flight by
+  preempting the oldest, so the newest hop still gets its preview
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from unittest.mock import MagicMock
 
 import pytest
 from conftest import MockSettings
 
+from src.modules.constants import MAX_CONCURRENT_EDSM_LOOKUPS
 from src.modules.edsm_next_hop import REASON_FINAL_HOP, REASON_HOP, REASON_NO_ROUTE, REASON_OFF_ROUTE
 from src.modules.edsm_next_hop_consumer import EdsmNextHopConsumer
 from src.modules.edsm_read_client import (
@@ -305,3 +310,141 @@ class TestCurrentSystemProperty:
         consumer.observe(_event("FSDJump", "Sol"))
         consumer.on_session_start()
         assert consumer.current_system == ""
+
+
+class _BlockingReadClient:
+    """Read client whose calls block until released; records calls thread-safely."""
+
+    def __init__(self) -> None:
+        self._release = threading.Event()
+        self._lock = threading.Lock()
+        self.bodies_calls: list[str] = []
+
+    def release(self) -> None:
+        self._release.set()
+
+    def get_system_bodies(self, system_name: str) -> SystemBodiesResult:
+        with self._lock:
+            self.bodies_calls.append(system_name)
+        self._release.wait(timeout=5)
+        return SystemBodiesResult(status=STATUS_UNKNOWN, system_name=system_name)
+
+    def get_estimated_value(self, system_name: str) -> SystemValueResult:
+        self._release.wait(timeout=5)
+        return SystemValueResult(status=STATUS_UNKNOWN, system_name=system_name)
+
+
+def _route_to(hop_system: str) -> list[dict]:
+    return [
+        {"StarSystem": "Sol", "SystemAddress": 10477373803, "StarClass": "G"},
+        {"StarSystem": hop_system, "SystemAddress": 55230754, "StarClass": "B"},
+    ]
+
+
+class TestConcurrencyCap:
+    """Rapidly changing hops must not fan out one unbounded lookup pair per change."""
+
+    @pytest.mark.asyncio
+    async def test_burst_of_distinct_hops_previews_the_newest_hop(self):
+        """Past the cap the oldest hop lookup is preempted, not the newest hop's.
+
+        Dropping the newest hop instead produced no preview for it at all:
+        ``_reevaluate()`` had already committed the dedup key, so the hop was
+        never retried and every older in-flight result was discarded as stale.
+        """
+        client = _BlockingReadClient()
+        consumer, captured = _make(client=client)
+        consumer.observe(_event("FSDJump", "Sol", 10477373803))
+
+        rounds = MAX_CONCURRENT_EDSM_LOOKUPS * 3
+        preempted: list[asyncio.Task] = []
+        for i in range(rounds):
+            before = set(consumer._lookup_tasks)
+            consumer.on_nav_route(_route_to(f"Hop {i}"))
+            assert len(consumer._lookup_tasks) <= MAX_CONCURRENT_EDSM_LOOKUPS
+            preempted.extend(before - set(consumer._lookup_tasks))
+
+        newest = f"Hop {rounds - 1}"
+        tasks = list(consumer._lookup_tasks)
+        assert len(tasks) == MAX_CONCURRENT_EDSM_LOOKUPS
+        assert len(preempted) == rounds - MAX_CONCURRENT_EDSM_LOOKUPS
+
+        client.release()
+        await asyncio.gather(*tasks, *preempted, return_exceptions=True)
+
+        # Exactly one hop preview, for the hop the route now points at.
+        # (The first entry is the neutral no-route emit from the arrival.)
+        hop_previews = [p for p in captured if p["reason"] == REASON_HOP]
+        assert [p["system"] for p in hop_previews] == [newest]
+        assert hop_previews[-1]["scoopable"] is True  # class B, from the route
+        assert all(task.cancelled() for task in preempted)
+        assert consumer._lookup_tasks == {}
+
+    @pytest.mark.asyncio
+    async def test_preempted_in_flight_hop_lookup_emits_nothing(self):
+        """A hop lookup preempted after its request started is cancelled and stays silent."""
+        client = _BlockingReadClient()
+        consumer, captured = _make(client=client)
+        consumer.observe(_event("FSDJump", "Sol", 10477373803))
+        consumer.on_nav_route(_route_to("Old Hop"))
+        oldest = next(iter(consumer._lookup_tasks))
+        for _ in range(200):  # let it reach the (blocking) read client
+            if client.bodies_calls:
+                break
+            await asyncio.sleep(0.005)
+        assert client.bodies_calls == ["Old Hop"]
+
+        for i in range(MAX_CONCURRENT_EDSM_LOOKUPS):
+            consumer.on_nav_route(_route_to(f"Hop {i}"))
+
+        assert oldest not in consumer._lookup_tasks  # slot released at preemption
+        assert len(consumer._lookup_tasks) == MAX_CONCURRENT_EDSM_LOOKUPS
+
+        client.release()
+        await asyncio.gather(*list(consumer._lookup_tasks), oldest, return_exceptions=True)
+
+        assert oldest.cancelled()
+        assert "Old Hop" not in [p["system"] for p in captured]
+
+    @pytest.mark.asyncio
+    async def test_pending_emits_do_not_consume_lookup_slots(self):
+        """Neutral previews emit without a lookup, so they must not fill the lookup cap."""
+        client = _BlockingReadClient()
+        consumer, _captured = _make(client=client)
+        consumer.observe(_event("FSDJump", "Sol", 10477373803))
+
+        rounds = MAX_CONCURRENT_EDSM_LOOKUPS * 2
+        for i in range(rounds):
+            consumer.on_nav_route([])  # no route -> neutral emit, no lookup
+            consumer.on_nav_route(_route_to(f"Hop {i}"))  # re-plotted -> lookup
+
+        emits = list(consumer._tasks)
+        lookups = list(consumer._lookup_tasks)
+        assert len(emits) == rounds  # decky emits are queued, not capped
+        assert len(lookups) == MAX_CONCURRENT_EDSM_LOOKUPS
+
+        client.release()
+        await asyncio.gather(*lookups, *emits)
+
+        # Lookups still ran: the queued emits never occupied a lookup slot.
+        assert len(client.bodies_calls) == MAX_CONCURRENT_EDSM_LOOKUPS
+
+    @pytest.mark.asyncio
+    async def test_session_stop_cancels_tracked_tasks_and_frees_slots(self):
+        client = _BlockingReadClient()
+        consumer, _captured = _make(client=client)
+        consumer.observe(_event("FSDJump", "Sol", 10477373803))
+        for i in range(MAX_CONCURRENT_EDSM_LOOKUPS):
+            consumer.on_nav_route(_route_to(f"Hop {i}"))
+        tasks = list(consumer._lookup_tasks)
+
+        consumer.on_session_stop()
+
+        assert consumer._lookup_tasks == {}
+        await asyncio.gather(*tasks, return_exceptions=True)
+        assert all(task.cancelled() for task in tasks)
+
+        consumer.observe(_event("FSDJump", "Sol", 10477373803))
+        consumer.on_nav_route(_route_to("Colonia"))
+        assert len(consumer._lookup_tasks) == 1
+        consumer.on_session_stop()

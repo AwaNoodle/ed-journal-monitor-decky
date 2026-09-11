@@ -6,9 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Clear EDSM Credentials** button in Setup ▸ EDSM account, so you can withdraw consent for identifiable EDSM uploads without hand-editing files. It stops forwarding immediately.
+
+### Changed
+
+- Diagnostic bundles no longer contain your EDSM API key, and shorten your home directory to `~`, so they are safe to attach to a bug report.
+- The EDSM API key is now masked as you type it, and its settings file is stored with owner-only permissions.
+
 ### Fixed
 
 - Codex-entry uploads now identify the body from the game's live status and omit body details when they can't be confirmed, instead of trusting whatever the game journal happened to report.
+- Journal events written while the game was mid-line are no longer lost; they are picked up on the next check instead of being skipped.
+- FSSSignalDiscovered batches can no longer be uploaded against the wrong star system after a jump.
+- Unusual files in the journal folder (a large file, a pipe, a folder matching the journal name) no longer stall or hang monitoring, and a bad file can no longer leave the panel showing "monitoring" while nothing is being read.
+- A slow or unresponsive EDSM no longer freezes the plugin, and a malformed EDSM reply no longer silently disables forwarding for the rest of the session.
+- The last batch of EDSM uploads is no longer lost when Decky restarts or the plugin reloads while you are still playing.
+- Turning off uploading (or stopping the watcher) now takes effect immediately, instead of finishing a catch-up replay first.
+- Rapid consecutive jumps no longer leave the panel showing a worth-scanning verdict for an earlier system.
 
 ## [0.8.4] - 2026-09-04
 

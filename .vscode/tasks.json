@@ -84,16 +84,43 @@
             "dependsOn": [
                 "chmodplugins"
             ],
-            "command": "rsync -azp --chmod=D0755,F0755 --rsh='ssh -p ${config:deckport} ${config:deckkey}' out/ ${config:deckuser}@${config:deckip}:${config:deckdir}/homebrew/plugins",
+            "command": "'${workspaceFolder}/.vscode/deploy.sh' copy-zip",
+            "options": {
+                "env": {
+                    "DECK_USER": "${config:deckuser}",
+                    "DECK_IP": "${config:deckip}",
+                    "DECK_PORT": "${config:deckport}",
+                    "DECK_DIR": "${config:deckdir}",
+                    "PLUGIN_NAME": "${config:pluginname}",
+                    "DECK_KEY": "${config:deckkey}"
+                }
+            },
             "problemMatcher": []
         },
-        //
+        //Extracts the deployed zip on the device.
+        //Every settings.json value reaches deploy.sh through the task
+        //environment, never spliced into this command string: VS Code
+        //substitutes ${config:*} as raw text, so a quote or `$(` in a spliced
+        //value would be parsed by the local shell before deploy.sh could
+        //validate it. deploy.sh validates each value and runs
+        //.vscode/deploy-remote.sh on the device over `ssh -t`, so sudo prompts
+        //interactively instead of being fed a password.
         {
             "label": "extractzip",
-            "detail": "",
+            "detail": "Extract the deployed plugin zip on the deck",
             "type": "shell",
             "group": "none",
-            "command": "echo '${config:deckdir}/homebrew/plugins/${config:pluginname}.zip' && ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo ${config:deckpass} | sudo -S mkdir -m 755 -p \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" && echo ${config:deckpass} | sudo -S chown ${config:deckuser}:${config:deckuser} \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" && echo ${config:deckpass} | sudo -S bsdtar -xzpf \"${config:deckdir}/homebrew/plugins/${config:pluginname}.zip\" -C \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" --strip-components=1 --fflags '",
+            "command": "'${workspaceFolder}/.vscode/deploy.sh' extract",
+            "options": {
+                "env": {
+                    "DECK_USER": "${config:deckuser}",
+                    "DECK_IP": "${config:deckip}",
+                    "DECK_PORT": "${config:deckport}",
+                    "DECK_DIR": "${config:deckdir}",
+                    "PLUGIN_NAME": "${config:pluginname}",
+                    "DECK_KEY": "${config:deckkey}"
+                }
+            },
             "problemMatcher": []
         },
         //"All-in-one" deploy task
@@ -135,7 +162,17 @@
             "detail": "chmods plugins folder to prevent perms issues",
             "type": "shell",
             "group": "none",
-            "command": "ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo '${config:deckpass}' | sudo -S chown ${config:deckuser} ${config:deckdir}/homebrew/plugins/'",
+            "command": "'${workspaceFolder}/.vscode/deploy.sh' chmod-plugins",
+            "options": {
+                "env": {
+                    "DECK_USER": "${config:deckuser}",
+                    "DECK_IP": "${config:deckip}",
+                    "DECK_PORT": "${config:deckport}",
+                    "DECK_DIR": "${config:deckdir}",
+                    "PLUGIN_NAME": "${config:pluginname}",
+                    "DECK_KEY": "${config:deckkey}"
+                }
+            },
             "problemMatcher": []
         },
         {
@@ -143,7 +180,17 @@
             "detail": "restarts decky",
             "type": "shell",
             "group": "none",
-            "command": "ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo '${config:deckpass}' | sudo -S systemctl restart plugin_loader'",
+            "command": "'${workspaceFolder}/.vscode/deploy.sh' restart-decky",
+            "options": {
+                "env": {
+                    "DECK_USER": "${config:deckuser}",
+                    "DECK_IP": "${config:deckip}",
+                    "DECK_PORT": "${config:deckport}",
+                    "DECK_DIR": "${config:deckdir}",
+                    "PLUGIN_NAME": "${config:pluginname}",
+                    "DECK_KEY": "${config:deckkey}"
+                }
+            },
             "problemMatcher": []
         },
     ]

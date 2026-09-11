@@ -6,10 +6,16 @@ Parses Elite Dangerous journal JSON lines and filters EDDN-reportable events.
 """
 
 import json
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.modules.constants import REPORTABLE_EVENTS
+import decky
+from src.modules.constants import (
+    MAX_AUXILIARY_FILE_BYTES,
+    MAX_COMMANDER_NAME_LENGTH,
+    REPORTABLE_EVENTS,
+)
 
 
 @dataclass
@@ -41,6 +47,40 @@ class ParsedEvent:
     raw: dict
     event_type: str
     timestamp: str
+
+
+def is_parseable_sidecar(path: Path) -> bool:
+    """Whether ``path`` is a regular file small enough to parse in-process.
+
+    Anything else -- a directory, a FIFO, a device node, a file above
+    MAX_AUXILIARY_FILE_BYTES, or a path that cannot be stat()ed at all --
+    is refused before it is opened: the watched directory is only assumed
+    to be where Elite writes its sidecars, never that everything in it is
+    one. Shared with status_reader.py, which guards Status.json the same
+    way.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+
+    if not stat.S_ISREG(st.st_mode):
+        decky.logger.debug(f"Refusing to parse non-regular file {path}")
+        return False
+
+    if st.st_size > MAX_AUXILIARY_FILE_BYTES:
+        decky.logger.debug(
+            f"Refusing to parse {path}: {st.st_size} bytes exceeds "
+            f"the {MAX_AUXILIARY_FILE_BYTES}-byte auxiliary file limit"
+        )
+        return False
+
+    return True
+
+
+def _is_plausible_commander(value: object) -> bool:
+    """Whether a journal ``Commander`` value may become the EDDN uploaderID."""
+    return isinstance(value, str) and 0 < len(value.strip()) <= MAX_COMMANDER_NAME_LENGTH
 
 
 class JournalParser:
@@ -98,9 +138,24 @@ class JournalParser:
         return event.event_type in REPORTABLE_EVENTS
 
     def parse_auxiliary_file(self, filepath: str) -> dict | None:
-        """Parse an auxiliary JSON file (Market/Outfitting/Shipyard/NavRoute)."""
+        """Parse an auxiliary JSON file (Market/Outfitting/Shipyard/NavRoute).
+
+        Returns None on any failure -- the watcher's retry loop depends on
+        that contract, so nothing here may raise.
+
+        The watched directory is only assumed to be where Elite writes its
+        sidecars, never that everything in it is one, so the path is
+        stat()ed before it is opened: anything that is not a regular file
+        (a FIFO would block the plugin's single event loop on open) or is
+        larger than MAX_AUXILIARY_FILE_BYTES is refused unparsed. Real
+        sidecars are a few hundred KB.
+        """
+        path = Path(filepath)
+        if not is_parseable_sidecar(path):
+            return None
+
         try:
-            with Path(filepath).open(encoding="utf-8", errors="replace") as f:
+            with path.open(encoding="utf-8", errors="replace") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             return None
@@ -120,14 +175,27 @@ class JournalParser:
 
         Only set horizons/odyssey when the LoadGame event actually carries the
         key: EDDN requires omitting them entirely when unknown, never guessing.
+
+        The commander name becomes the public EDDN ``uploaderID``, so it is
+        accepted only as a plausible name -- a str of 1..
+        MAX_COMMANDER_NAME_LENGTH non-blank characters. Anything else (a
+        planted journal's dict, list, or multi-MB string) leaves the
+        previously known commander in place. The accepted value is stored
+        verbatim, never trimmed: it must reach EDDN exactly as Elite wrote
+        it.
         """
         if "Horizons" in data:
             self.session_state.horizons = data.get("Horizons")
         if "Odyssey" in data:
             self.session_state.odyssey = data.get("Odyssey")
         commander = data.get("Commander", "")
-        if commander:
+        if _is_plausible_commander(commander):
             self.session_state.commander = commander
+        elif commander:
+            decky.logger.debug(
+                f"LoadGame Commander rejected (type {type(commander).__name__}); "
+                "keeping the previous commander name"
+            )
 
     def _update_journal_body(self, data: dict) -> None:
         """Track the current body from ApproachBody/Location/CarrierJump.
