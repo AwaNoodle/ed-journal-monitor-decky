@@ -132,6 +132,10 @@ It is fully isolated from EDDN - bad EDSM credentials surface as a "check your E
 
 The **Detailed Logging** toggle in the panel's **Troubleshooting** section switches log verbosity from INFO to DEBUG for richer diagnostic output. Persists across restarts.
 
+### Diagnostic bundle
+
+The bundle built by **Troubleshooting ▸ Create Diagnostic Bundle** is safe to attach to a bug report: your EDSM API key is replaced with `<redacted>`, and your home directory is shortened to `~` so the bundle does not carry your username.
+
 ## Troubleshooting
 
 See [troubleshooting.md](troubleshooting.md) for SSL errors, journal path problems, submission failures, and detection issues.

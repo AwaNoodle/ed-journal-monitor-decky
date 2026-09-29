@@ -6,8 +6,8 @@ The **Create Diagnostic Bundle** button in the plugin's Troubleshooting section 
 
 | File | Contents |
 |------|----------|
-| `runtime_state.json` | Python version, plugin version, watcher state, file positions, known files, settings summary, submitter stats |
-| `settings.json` | Raw settings dump |
+| `runtime_state.json` | Python version, plugin version, watcher state, file positions, known files, settings summary, submitter stats. Paths under your home directory are shortened to `~` |
+| `settings.json` | Settings dump with your EDSM API key replaced by `<redacted>` |
 | `plugin.json` | Plugin metadata |
 | `plugin.log` | Decky plugin log (if available) |
 

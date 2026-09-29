@@ -148,6 +148,46 @@ class TestCreateDiagnostics:
         zip_path = Path(result2["path"])
         assert zip_path.exists()
 
+    def test_redacts_api_key_everywhere_in_bundle(
+        self, settings_dir, plugin_dir, log_dir, mock_settings, mock_watcher, mock_submitter
+    ):
+        """No bundle member may contain the plaintext EDSM API key."""
+        fake_key = "edsm-secret-key-abc123"
+        (settings_dir / "settings.json").write_text(json.dumps({
+            "enabled": True,
+            "edsm_commander_name": "CmdrTest",
+            "edsm_api_key": fake_key,
+        }))
+
+        result = create_diagnostics(mock_settings, mock_watcher, mock_submitter)
+        assert result["success"] is True
+
+        with zipfile.ZipFile(result["path"]) as zf:
+            for name in zf.namelist():
+                assert fake_key.encode() not in zf.read(name), f"api key leaked into {name}"
+
+            settings_copy = json.loads(zf.read("settings.json"))
+            assert settings_copy["edsm_api_key"] == "<redacted>"
+            # Non-secret settings survive intact.
+            assert settings_copy["enabled"] is True
+            assert settings_copy["edsm_commander_name"] == "CmdrTest"
+
+    def test_corrupt_settings_file_is_not_copied_verbatim(
+        self, settings_dir, plugin_dir, mock_settings, mock_watcher, mock_submitter
+    ):
+        """An unparseable settings file yields a note, never its raw bytes."""
+        fake_key = "edsm-secret-key-abc123"
+        (settings_dir / "settings.json").write_text('{"edsm_api_key": "' + fake_key + '", ')
+
+        result = create_diagnostics(mock_settings, mock_watcher, mock_submitter)
+        assert result["success"] is True
+
+        with zipfile.ZipFile(result["path"]) as zf:
+            for name in zf.namelist():
+                assert fake_key.encode() not in zf.read(name), f"api key leaked into {name}"
+            note = json.loads(zf.read("settings.json"))
+            assert "error" in note
+
 
 class TestSetDetailedLogging:
     """Test set_detailed_logging via Plugin class."""
@@ -250,3 +290,23 @@ class TestGatherRuntimeState:
 
         assert state["watcher_running"] is False
         assert state["submitter_stats"] == {}
+
+    def test_masks_home_prefix_in_paths(self, mock_settings, mock_submitter):
+        """Paths under the user's home are reported with '~' — the username is not
+        diagnostic, the path structure is."""
+        home = str(Path.home())
+        journal_dir = f"{home}/.steam/journal"
+        journal_file = f"{journal_dir}/Journal.2026.log"
+        watcher = MagicMock()
+        watcher.is_running = True
+        watcher._journal_path = journal_dir
+        watcher._poll_interval = 10
+        watcher._file_positions = {journal_file: 4096}
+        watcher._known_files = {journal_file}
+
+        state = _gather_runtime_state(mock_settings, watcher, mock_submitter)
+
+        assert state["journal_path"] == "~/.steam/journal"
+        assert state["known_files"] == ["~/.steam/journal/Journal.2026.log"]
+        assert state["file_positions"] == {"~/.steam/journal/Journal.2026.log": 4096}
+        assert home not in json.dumps(state)

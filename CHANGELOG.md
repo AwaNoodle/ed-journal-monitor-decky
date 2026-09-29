@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Diagnostic bundles no longer contain your EDSM API key, and shorten your home directory to `~`, so they are safe to attach to a bug report.
+
 ### Fixed
 
 - Codex-entry uploads now identify the body from the game's live status and omit body details when they can't be confirmed, instead of trusting whatever the game journal happened to report.
