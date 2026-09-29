@@ -2,12 +2,13 @@
 Tests for the per-system TTL cache used by the EDSM lookup path.
 
 Covers: cache hit (no new request), cache miss after TTL expiry,
-and basic set/get round-trip.
+basic set/get round-trip, and the LRU entry cap.
 """
 
 import time
 from unittest.mock import patch
 
+from src.modules.constants import MAX_SYSTEM_CACHE_ENTRIES
 from src.modules.edsm_read_client import (
     STATUS_OK,
     STATUS_UNKNOWN,
@@ -131,3 +132,78 @@ class TestValueCache:
         cache.set_value("Sol", _ok_value_result("Sol"))
         cache.clear()
         assert cache.get_value("Sol") is None
+
+
+class TestEntryCap:
+    """Each store is bounded: a long route must not grow the cache without limit."""
+
+    def test_default_cap_is_the_shared_constant(self):
+        cache = SystemLookupCache()
+        for i in range(MAX_SYSTEM_CACHE_ENTRIES + 10):
+            cache.set(f"System {i}", _ok_result(f"System {i}"))
+        assert len(cache._store) == MAX_SYSTEM_CACHE_ENTRIES
+
+    def test_insert_past_cap_evicts_least_recently_used(self):
+        cache = SystemLookupCache(ttl_seconds=3600, max_entries=3)
+        for name in ("Sol", "Maia", "Wolf 359"):
+            cache.set(name, _ok_result(name))
+
+        cache.set("Colonia", _ok_result("Colonia"))
+
+        assert cache.get("Sol") is None  # oldest, evicted
+        assert cache.get("Maia") is not None
+        assert cache.get("Wolf 359") is not None
+        assert cache.get("Colonia") is not None
+
+    def test_read_protects_an_older_entry_from_eviction(self):
+        cache = SystemLookupCache(ttl_seconds=3600, max_entries=3)
+        for name in ("Sol", "Maia", "Wolf 359"):
+            cache.set(name, _ok_result(name))
+
+        assert cache.get("Sol") is not None  # re-read makes Sol most recent
+        cache.set("Colonia", _ok_result("Colonia"))
+
+        assert cache.get("Sol") is not None
+        assert cache.get("Maia") is None  # now the least recently used
+
+    def test_reinsert_refreshes_recency_without_growing_the_store(self):
+        cache = SystemLookupCache(ttl_seconds=3600, max_entries=2)
+        cache.set("Sol", _ok_result("Sol"))
+        cache.set("Maia", _ok_result("Maia"))
+
+        cache.set("Sol", _ok_result("Sol"))  # overwrite, not a new slot
+        cache.set("Colonia", _ok_result("Colonia"))
+
+        assert cache.get("Maia") is None
+        assert cache.get("Sol") is not None
+        assert cache.get("Colonia") is not None
+
+    def test_read_does_not_extend_the_ttl(self):
+        """LRU recency and TTL freshness are separate: a hit must not renew the TTL."""
+        cache = SystemLookupCache(ttl_seconds=60, max_entries=8)
+        cache.set("Sol", _ok_result("Sol"))
+        assert cache.get("Sol") is not None
+
+        with patch("src.modules.edsm_system_cache.time.monotonic", return_value=time.monotonic() + 61):
+            assert cache.get("Sol") is None
+
+    def test_bodies_eviction_does_not_evict_the_value_entry(self):
+        cache = SystemLookupCache(ttl_seconds=3600, max_entries=1)
+        cache.set("Sol", _ok_result("Sol"))
+        value = _ok_value_result("Sol")
+        cache.set_value("Sol", value)
+
+        cache.set("Maia", _ok_result("Maia"))  # evicts Sol from the bodies store only
+
+        assert cache.get("Sol") is None
+        assert cache.get_value("Sol") is value
+
+    def test_value_store_is_capped_independently(self):
+        cache = SystemLookupCache(ttl_seconds=3600, max_entries=2)
+        bodies = _ok_result("Sol")
+        cache.set("Sol", bodies)
+        for name in ("Sol", "Maia", "Wolf 359"):
+            cache.set_value(name, _ok_value_result(name))
+
+        assert cache.get_value("Sol") is None  # evicted from the value store
+        assert cache.get("Sol") is bodies  # bodies entry untouched
