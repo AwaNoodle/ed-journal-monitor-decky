@@ -7,6 +7,8 @@ stats with reset + failure isolation, and msgnum-driven retry behavior.
 """
 
 import asyncio
+import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -77,6 +79,16 @@ def _make_forwarder(api_key="key-123", discard=None, client=None, flush_size=20,
     return fwd
 
 
+async def _settle(predicate, timeout=2.0):
+    """Wait for work dispatched to the default executor to land back on the loop."""
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            return False
+        await asyncio.sleep(0.005)
+    return True
+
+
 class TestObserveFiltering:
     def test_queues_non_discarded_verbatim(self):
         fwd = _make_forwarder(discard={"Music"})
@@ -139,8 +151,7 @@ class TestFlushLifecycle:
         fwd = _make_forwarder(discard=set(), client=client, flush_size=3)
         for i in range(3):
             fwd.observe(_event("FSDJump", StarSystem=f"S{i}"), _session())
-        await asyncio.sleep(0)  # let the scheduled flush task run
-        assert client.post_journal.call_count == 1
+        assert await _settle(lambda: client.post_journal.call_count == 1)
         assert fwd._buffer == []
 
     @pytest.mark.asyncio
@@ -160,9 +171,8 @@ class TestFlushLifecycle:
         fwd = _make_forwarder(discard=set(), client=client, flush_size=100, flush_interval=0.01)
         fwd.observe(_event("FSDJump"), _session())
         fwd._start_timer()
-        await asyncio.sleep(0.05)
+        assert await _settle(lambda: client.post_journal.call_count >= 1)
         fwd._cancel_tasks()
-        assert client.post_journal.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_manual_flush_posts_batch(self):
@@ -347,7 +357,7 @@ class TestDiscardFetch:
         settings = MockSettings(initial_data={"edsm_api_key": "k", "edsm_commander_name": "C"})
         fwd = EdsmForwarder(settings, client=client)
         fwd.on_session_start()
-        await asyncio.sleep(0)
+        assert await _settle(lambda: fwd._discard is not None)
         assert fwd._discard == {"Music", "Market"}
         fwd._cancel_tasks()
 
@@ -393,8 +403,6 @@ class TestBufferCap:
 class TestRateLimitGate:
     @pytest.mark.asyncio
     async def test_backoff_gates_concurrent_flush(self):
-        import time
-
         client = MagicMock()
         client.post_journal.return_value = EdsmResponse(
             msgnum=100, msg="OK", ok=True,
@@ -412,6 +420,57 @@ class TestRateLimitGate:
         assert len(fwd._buffer) == 1  # new event stays buffered
 
 
+class TestBlockingCallsOffTheLoop:
+    """The plugin has one event loop; a stalling EDSM endpoint must not hold it
+    for the client's full 20s timeout."""
+
+    @staticmethod
+    def _thread_recording_client(**returns):
+        client = MagicMock()
+        threads = []
+
+        def record(value):
+            def call(*_args, **_kwargs):
+                threads.append(threading.get_ident())
+                return value
+            return call
+
+        for attr, value in returns.items():
+            getattr(client, attr).side_effect = record(value)
+        return client, threads
+
+    @pytest.mark.asyncio
+    async def test_post_runs_off_the_loop_thread(self):
+        client, threads = self._thread_recording_client(post_journal=_ok())
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=100)
+        fwd.observe(_event("FSDJump"), _session())
+        await fwd.flush()
+        assert threads == [threads[0]] and threads[0] != threading.get_ident()
+        assert fwd.get_stats()["success_count"] == 1  # response still applied
+
+    @pytest.mark.asyncio
+    async def test_discard_fetch_runs_off_the_loop_thread(self):
+        client, threads = self._thread_recording_client(fetch_discard={"Music"})
+        settings = MockSettings(initial_data={"edsm_api_key": "k", "edsm_commander_name": "C"})
+        fwd = EdsmForwarder(settings, client=client)
+        fwd.on_session_start()
+        assert await _settle(lambda: fwd._discard is not None)
+        fwd._cancel_tasks()
+        assert threads[0] != threading.get_ident()
+
+    @pytest.mark.asyncio
+    async def test_forced_flush_on_stop_is_offloaded_and_still_posts(self):
+        """on_session_stop is called from a coroutine on the loop: it cannot
+        await, but it must neither block nor lose the final batch."""
+        client, threads = self._thread_recording_client(post_journal=_ok())
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=100)
+        fwd.observe(_event("FSDJump"), _session())
+        fwd.on_session_stop()
+        assert await _settle(lambda: client.post_journal.call_count == 1)
+        assert threads[0] != threading.get_ident()
+        assert fwd._buffer == []
+
+
 class TestServerMessageBounds:
     @pytest.mark.asyncio
     async def test_huge_server_msg_truncated_in_stats(self):
@@ -424,3 +483,179 @@ class TestServerMessageBounds:
         fwd.observe(_event("FSDJump"), _session())
         await fwd.flush()
         assert len(fwd.get_stats()["last_msg"]) == MAX_SERVER_MESSAGE_CHARS
+
+
+class TestDiscardLoopResilience:
+    @pytest.mark.asyncio
+    async def test_bad_response_retries_instead_of_killing_the_loop(self):
+        """If the discard task dies, `_discard` stays None and every event is
+        dropped for the rest of the session, with no retry and no signal."""
+        client = MagicMock()
+        client.fetch_discard.side_effect = [
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+            {"Music"},
+        ]
+        client.post_journal.return_value = _ok()
+        settings = MockSettings(initial_data={
+            "edsm_api_key": "k", "edsm_commander_name": "C", "software_version": "0.4.0",
+        })
+        fwd = EdsmForwarder(settings, client=client, flush_size=100, discard_retry_interval=0.01)
+        fwd.on_session_start()
+
+        assert await _settle(lambda: fwd._discard == {"Music"})
+        fwd._cancel_tasks()
+
+        # Forwarding resumes once the discard list finally arrives.
+        fwd.observe(_event("FSDJump"), _session())
+        await fwd.flush()
+        assert client.post_journal.call_count == 1
+        assert fwd.get_stats()["success_count"] == 1
+
+
+class TestUnloadDrain:
+    """`on_session_stop()` can only schedule the final POST; plugin unload is
+    about to take the loop away, so it has to await it."""
+
+    @pytest.mark.asyncio
+    async def test_drain_sends_the_batch_taken_by_session_stop(self):
+        client = MagicMock()
+        client.post_journal.return_value = _ok()
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=100)
+        fwd.observe(_event("FSDJump", StarSystem="Sol"), _session())
+        fwd.on_session_stop()
+        client.post_journal.assert_not_called()  # scheduled only
+
+        await fwd.drain()
+
+        assert client.post_journal.call_count == 1
+        assert client.post_journal.call_args.kwargs["messages"][0]["StarSystem"] == "Sol"
+        assert fwd.get_stats()["success_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_drain_also_awaits_tasks_the_drain_itself_schedules(self):
+        """The final flush schedules one activity record per event *while* it is
+        being drained, and recording suspends (the real log awaits an emit), so
+        draining the tasks that exist when drain() is entered is not enough."""
+        class SuspendingActivityLog(FakeActivityLog):
+            async def record_success(self, event_type, target="eddn"):
+                await asyncio.sleep(0.01)
+                await super().record_success(event_type, target=target)
+
+        activity = SuspendingActivityLog()
+        client = MagicMock()
+        client.post_journal.return_value = _ok()
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=100, activity_log=activity)
+        fwd.observe(_event("FSDJump"), _session())
+        fwd.on_session_stop()
+
+        await fwd.drain()
+
+        assert [e["outcome"] for e in activity.entries] == ["success"]
+        assert fwd._flush_tasks == set()
+
+    @pytest.mark.asyncio
+    async def test_unload_flushes_buffered_events(self, tmp_path, monkeypatch):
+        """The B1 path: Decky tears the plugin down while ED is still running."""
+        from unittest.mock import AsyncMock, patch
+
+        from main import Plugin
+
+        for var in ("DECKY_PLUGIN_SETTINGS_DIR", "DECKY_PLUGIN_RUNTIME_DIR", "DECKY_PLUGIN_LOG_DIR"):
+            monkeypatch.setenv(var, str(tmp_path))
+        plugin = Plugin()
+        with patch("decky.emit", new_callable=AsyncMock):
+            await plugin._main()
+        await plugin.settings.set("edsm_api_key", "key-123")
+        client = MagicMock()
+        client.post_journal.return_value = _ok()
+        plugin.edsm._client = client
+        plugin.edsm._discard = set()
+        plugin.edsm._active = True
+        plugin.edsm.observe(_event("FSDJump", StarSystem="Sol"), _session())
+        plugin.watcher = MagicMock()
+        plugin.watcher.is_running = True
+        plugin.watcher.stop = AsyncMock()
+
+        with patch("decky.emit", new_callable=AsyncMock):
+            await plugin._unload()
+
+        assert client.post_journal.call_count == 1
+        assert client.post_journal.call_args.kwargs["messages"][0]["StarSystem"] == "Sol"
+
+
+class TestFlushSerialisation:
+    """The POST is offloaded to a worker thread, so two flushes could otherwise
+    be in flight at once — reordering batches on the wire and slipping past a
+    backoff window opened by the batch still in flight."""
+
+    @staticmethod
+    def _probe_client(response, post_seconds=0.05):
+        """A client that logs a start/end pair around each (slow) POST."""
+        client = MagicMock()
+        log = []
+
+        def post(**kwargs):
+            systems = tuple(m["StarSystem"] for m in kwargs["messages"])
+            log.append(("start", systems))
+            time.sleep(post_seconds)
+            log.append(("end", systems))
+            return response
+
+        client.post_journal.side_effect = post
+        return client, log
+
+    @pytest.mark.asyncio
+    async def test_second_flush_waits_for_the_first_and_keeps_journal_order(self):
+        client, log = self._probe_client(_ok())
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=2)
+
+        fwd.observe(_event("FSDJump", StarSystem="A1"), _session())
+        fwd.observe(_event("FSDJump", StarSystem="A2"), _session())
+        assert await _settle(lambda: log and log[0][0] == "start")
+        # Batch A is on the wire; batch B reaches the size threshold now.
+        fwd.observe(_event("FSDJump", StarSystem="B1"), _session())
+        fwd.observe(_event("FSDJump", StarSystem="B2"), _session())
+
+        assert await _settle(lambda: len(log) == 4, timeout=5)
+        await fwd.drain()
+        assert log == [
+            ("start", ("A1", "A2")), ("end", ("A1", "A2")),
+            ("start", ("B1", "B2")), ("end", ("B1", "B2")),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_flush_in_flight_gates_the_next_flush_on_its_backoff(self):
+        client, log = self._probe_client(EdsmResponse(
+            msgnum=100, msg="OK", ok=True,
+            rate_limit_remaining=0, rate_limit_reset=int(time.time() + 1000),
+        ))
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=2)
+
+        fwd.observe(_event("FSDJump", StarSystem="A1"), _session())
+        fwd.observe(_event("FSDJump", StarSystem="A2"), _session())
+        assert await _settle(lambda: log and log[0][0] == "start")
+        fwd.observe(_event("FSDJump", StarSystem="B1"), _session())
+        fwd.observe(_event("FSDJump", StarSystem="B2"), _session())
+
+        await fwd.drain()
+
+        assert client.post_journal.call_count == 1  # B never POSTed through the 429
+        assert [e["StarSystem"] for e in fwd._buffer] == ["B1", "B2"]  # still buffered
+
+    @pytest.mark.asyncio
+    async def test_final_flush_does_not_overtake_a_flush_in_flight(self):
+        client, log = self._probe_client(_ok())
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=2)
+
+        fwd.observe(_event("FSDJump", StarSystem="A1"), _session())
+        fwd.observe(_event("FSDJump", StarSystem="A2"), _session())
+        assert await _settle(lambda: log and log[0][0] == "start")
+        fwd.observe(_event("FSDJump", StarSystem="Z1"), _session())
+        fwd.on_session_stop()
+
+        await fwd.drain()
+
+        assert log == [
+            ("start", ("A1", "A2")), ("end", ("A1", "A2")),
+            ("start", ("Z1",)), ("end", ("Z1",)),
+        ]

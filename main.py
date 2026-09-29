@@ -148,6 +148,11 @@ class Plugin:
         if self.watcher and self.watcher.is_running:
             await self.watcher.stop()
             self._notify_consumers_session_stop()
+            if self.edsm is not None:
+                # The forced final flush is a task on this loop: unload is about
+                # to take the loop away, so without awaiting it the buffered
+                # batch is lost with nothing left to retry.
+                await self.edsm.drain()
         decky.logger.info("ED Journal Monitor unloaded")
 
     async def _uninstall(self) -> None:
