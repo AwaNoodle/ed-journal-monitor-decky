@@ -160,3 +160,8 @@ STATUS_BODY_MAX_SKEW_SECONDS = 60
 # few hundred KB.
 MAX_AUXILIARY_FILE_BYTES = 16 * 1024 * 1024
 
+# Longest accepted `Commander` value. Elite's own limit is far below this;
+# the value becomes the public EDDN uploaderID, so it is length-bounded and
+# type-checked before it reaches session state.
+MAX_COMMANDER_NAME_LENGTH = 64
+
