@@ -14,6 +14,7 @@ from src.modules.constants import (
     EDDN_NAVROUTE_1_SCHEMA_REF,
     EDDN_OUTFITTING_2_SCHEMA_REF,
     EDDN_SHIPYARD_2_SCHEMA_REF,
+    MAX_UNIQUE_ARRAY_ITEMS,
 )
 from src.modules.parser import ParsedEvent, SessionState
 from src.modules.validator import EDDN_JOURNAL_1_SCHEMA_REF, EDDNValidator
@@ -2055,13 +2056,11 @@ class TestTransformCommodity:
         assert "stationType" not in message["message"]
         assert "carrierDockingAccess" not in message["message"]
 
-    def test_transform_commodity_survives_unhashable_status_flags(self, validator):
-        """A malformed StatusFlags entry must not crash the transform.
+    def test_transform_commodity_drops_non_string_status_flags(self, validator):
+        """commodity/3's statusFlags is an array of strings; anything else goes.
 
-        Deduping uses a set, so a non-hashable entry would raise where the
-        old pass-through could not.  A journal this malformed will be
-        rejected by EDDN on its own merits; losing the rest of the batch to
-        a TypeError would be worse.
+        A non-string would be rejected by the gateway anyway, and keeping
+        them forced the dedupe into an O(n^2) membership scan.
         """
         market_data = {
             "timestamp": "2026-01-12T13:05:00Z",
@@ -2073,7 +2072,14 @@ class TestTransformCommodity:
                     "Name": "$gold_name;",
                     "SellPrice": 48632,
                     "DemandBracket": 3,
-                    "StatusFlags": ["powerplay", {"unexpected": "object"}, "powerplay"],
+                    "StatusFlags": [
+                        "powerplay",
+                        {"unexpected": "object"},
+                        ["nested"],
+                        42,
+                        "producer",
+                        "powerplay",
+                    ],
                 },
             ],
         }
@@ -2081,10 +2087,105 @@ class TestTransformCommodity:
         message = validator.transform_commodity(market_data, SessionState())
 
         assert message is not None
-        assert message["message"]["commodities"][0]["statusFlags"] == [
-            "powerplay",
-            {"unexpected": "object"},
-        ]
+        assert message["message"]["commodities"][0]["statusFlags"] == ["powerplay", "producer"]
+
+    def test_transform_commodity_bulk_unhashable_status_flags(self, validator):
+        """Thousands of unhashable entries must transform without stalling.
+
+        This ran inside the watcher's awaited poll chain, so the old
+        quadratic fallback froze the whole backend rather than raising.
+        The trailing "producer" survives because the cap bounds the number
+        of unique entries kept, not how far into the array the scan looks.
+        """
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "SellPrice": 48632,
+                    "DemandBracket": 3,
+                    "StatusFlags": (
+                        ["powerplay"]
+                        + [{"flag": i} for i in range(5000)]
+                        + ["producer"]
+                    ),
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["commodities"][0]["statusFlags"] == ["powerplay", "producer"]
+
+    def test_transform_commodity_drops_blank_status_flags(self, validator):
+        """commodity/3 pins items.minLength: 1 -- "" would fail the message."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "SellPrice": 48632,
+                    "DemandBracket": 3,
+                    "StatusFlags": ["", "powerplay", "   "],
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert message["message"]["commodities"][0]["statusFlags"] == ["powerplay"]
+
+    def test_transform_commodity_omits_status_flags_that_were_only_blank(self, validator):
+        """An empty-string flag must not become statusFlags: [""] or []."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "SellPrice": 48632,
+                    "DemandBracket": 3,
+                    "StatusFlags": [""],
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert "statusFlags" not in message["message"]["commodities"][0]
+
+    def test_transform_commodity_omits_status_flags_when_all_dropped(self, validator):
+        """commodity/3 declares minItems: 1 -- an empty array fails the message."""
+        market_data = {
+            "timestamp": "2026-01-12T13:05:00Z",
+            "StarSystem": "Sol",
+            "StationName": "Test Station",
+            "MarketID": 123,
+            "Items": [
+                {
+                    "Name": "$gold_name;",
+                    "SellPrice": 48632,
+                    "DemandBracket": 3,
+                    "StatusFlags": [{"unexpected": "object"}, 7],
+                },
+            ],
+        }
+
+        message = validator.transform_commodity(market_data, SessionState())
+
+        assert message is not None
+        assert "statusFlags" not in message["message"]["commodities"][0]
 
     def test_transform_commodity_empty_returns_none(self, validator):
         market_data = {
@@ -2423,6 +2524,42 @@ class TestAsDictList:
     def test_empty_list(self):
         from src.modules.validator import _as_dict_list
         assert _as_dict_list([]) == []
+
+
+class TestDedupePreservingOrder:
+    """Contract of the uniqueItems helper: unique non-blank strings,
+    first-seen order, at most MAX_UNIQUE_ARRAY_ITEMS entries in the
+    *output* (the cap never truncates a merely repetitive array)."""
+
+    def test_keeps_first_seen_order(self):
+        from src.modules.validator import _dedupe_preserving_order
+        assert _dedupe_preserving_order(["b", "a", "b", "c", "a"]) == ["b", "a", "c"]
+
+    def test_stops_at_cap(self):
+        from src.modules.validator import _dedupe_preserving_order
+        names = [f"module_{i}" for i in range(MAX_UNIQUE_ARRAY_ITEMS + 25)]
+        result = _dedupe_preserving_order(names)
+        assert len(result) == MAX_UNIQUE_ARRAY_ITEMS
+        assert result[0] == "module_0"
+        assert result[-1] == f"module_{MAX_UNIQUE_ARRAY_ITEMS - 1}"
+
+    def test_duplicates_do_not_consume_the_cap(self):
+        """The cap bounds the output, so repetition can never truncate it.
+
+        Each run of duplicates is longer than the cap, which is exactly
+        what the old input-side slice truncated: it never reached the
+        second or third name.
+        """
+        from src.modules.validator import _dedupe_preserving_order
+        names = ["Hpt_ChaffLauncher_Tiny", "Int_Engine_Size3_Class5_Fast", "Empire_Courier"]
+        repetitive = [name for name in names for _ in range(5000)]
+        assert _dedupe_preserving_order(repetitive) == names
+
+    def test_drops_blank_and_whitespace_only_entries(self):
+        """items.minLength: 1 on all three arrays; a blank fails the message."""
+        from src.modules.validator import _dedupe_preserving_order
+        assert _dedupe_preserving_order(["", "Adder", "   ", "\t\n", "Adder"]) == ["Adder"]
+        assert _dedupe_preserving_order([""]) == []
 
 
 class TestTransformNavBeaconScan:

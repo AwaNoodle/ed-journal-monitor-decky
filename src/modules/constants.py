@@ -124,6 +124,11 @@ EDDN_FACTIONS_DISALLOWED_FIELDS = {
     "SquadronFaction",
 }
 
+# Longest list `_dedupe_preserving_order` will inspect (uniqueItems arrays:
+# outfitting/2 modules, shipyard/2 ships, commodity/3 statusFlags). Real
+# arrays are tens of entries; the excess is dropped rather than deduped.
+MAX_UNIQUE_ARRAY_ITEMS = 4096
+
 # Status.json (journal-directory sidecar) filename.
 STATUS_JSON_FILENAME = "Status.json"
 
