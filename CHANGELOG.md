@@ -6,10 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Clear EDSM Credentials** button in Setup ▸ EDSM account, so you can withdraw consent for identifiable EDSM uploads without hand-editing files. It stops forwarding immediately.
+
 ### Changed
 
 - Diagnostic bundles no longer contain your EDSM API key, and shorten your home directory to `~`, so they are safe to attach to a bug report.
 - The EDSM settings file is now stored with owner-only permissions.
+- The EDSM API key is now masked as you type it.
 
 ### Fixed
 

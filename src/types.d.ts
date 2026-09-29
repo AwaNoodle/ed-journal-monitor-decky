@@ -190,6 +190,8 @@ interface GetEdsmCredentialsResult {
 
 type SetEdsmCredentialsResult = BasicSuccessResult;
 
+type ClearEdsmCredentialsResult = BasicSuccessResult;
+
 interface DiagnosticsResult {
   success: boolean;
   path?: string;
