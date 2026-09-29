@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Diagnostic bundles no longer contain your EDSM API key, and shorten your home directory to `~`, so they are safe to attach to a bug report.
+- The EDSM settings file is now stored with owner-only permissions.
 
 ### Fixed
 
