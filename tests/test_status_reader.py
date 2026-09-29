@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from src.modules.constants import STATUS_BODY_MAX_SKEW_SECONDS
+from src.modules.constants import MAX_AUXILIARY_FILE_BYTES, STATUS_BODY_MAX_SKEW_SECONDS
 from src.modules.status_reader import read_status_body_name
 
 EVENT_TIMESTAMP = "2026-01-12T15:00:00Z"
@@ -183,8 +183,75 @@ class TestReadStatusBodyName:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_non_oserror_parse_failure_returns_none(self, tmp_path, monkeypatch):
+        """RecursionError (deep nesting) / MemoryError must not escape.
+
+        The reader documents "never raises" and the watcher relies on it:
+        only OSError and JSONDecodeError used to be caught.
+        """
+        _write_status(tmp_path, {"timestamp": EVENT_TIMESTAMP, "BodyName": "Earth"})
+
+        import src.modules.status_reader as status_reader_mod
+
+        def exploding_load(*args, **kwargs):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(status_reader_mod.json, "load", exploding_load)
+
+        async def fake_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(status_reader_mod.asyncio, "sleep", fake_sleep)
+
+        result = await read_status_body_name(str(tmp_path), EVENT_TIMESTAMP)
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_offsetless_event_timestamp_read_as_utc(self, tmp_path):
         _write_status(tmp_path, {"timestamp": EVENT_TIMESTAMP, "BodyName": "Earth"})
 
         result = await read_status_body_name(str(tmp_path), "2026-01-12T15:00:00")
         assert result == "Earth"
+
+    @pytest.mark.asyncio
+    async def test_oversized_status_file_refused_unparsed(self, tmp_path, monkeypatch):
+        """A Status.json above the auxiliary size limit is never parsed."""
+        status_path = tmp_path / "Status.json"
+        with status_path.open("wb") as f:
+            f.write(json.dumps({"timestamp": EVENT_TIMESTAMP, "BodyName": "Earth"}).encode())
+            f.truncate(MAX_AUXILIARY_FILE_BYTES + 1)
+
+        import src.modules.status_reader as status_reader_mod
+
+        parse_attempts = []
+        monkeypatch.setattr(status_reader_mod.json, "load", lambda *a, **k: parse_attempts.append(a))
+
+        async def fake_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(status_reader_mod.asyncio, "sleep", fake_sleep)
+
+        result = await read_status_body_name(str(tmp_path), EVENT_TIMESTAMP)
+        assert result is None
+        assert parse_attempts == []
+
+    @pytest.mark.asyncio
+    async def test_non_regular_status_path_refused_unopened(self, tmp_path, monkeypatch):
+        """A FIFO in place of Status.json would block the event loop on open."""
+        (tmp_path / "Status.json").mkdir()
+
+        import src.modules.status_reader as status_reader_mod
+
+        open_attempts = []
+        monkeypatch.setattr(
+            status_reader_mod.Path, "open", lambda self, *a, **k: open_attempts.append(self)
+        )
+
+        async def fake_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(status_reader_mod.asyncio, "sleep", fake_sleep)
+
+        result = await read_status_body_name(str(tmp_path), EVENT_TIMESTAMP)
+        assert result is None
+        assert open_attempts == []

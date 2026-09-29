@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from src.modules.constants import MAX_AUXILIARY_FILE_BYTES
 from src.modules.parser import JournalParser, ParsedEvent
 
 
@@ -325,3 +326,37 @@ class TestParseAuxiliaryFile:
         invalid_file.write_text("{broken", encoding="utf-8")
 
         assert parser.parse_auxiliary_file(str(invalid_file)) is None
+
+    def test_oversized_auxiliary_file_refused_unparsed(self, parser, tmp_path, monkeypatch):
+        """A sidecar above the size limit is refused before it is parsed.
+
+        The watched directory is not trusted to hold only files Elite wrote,
+        and parsing happens synchronously inside the watcher's poll chain.
+        """
+        oversized = tmp_path / "Market.json"
+        with oversized.open("wb") as f:
+            f.write(b'{"event":"Market"}')
+            f.truncate(MAX_AUXILIARY_FILE_BYTES + 1)
+
+        import src.modules.parser as parser_mod
+
+        parse_attempts = []
+        monkeypatch.setattr(parser_mod.json, "load", lambda *a, **k: parse_attempts.append(a))
+
+        assert parser.parse_auxiliary_file(str(oversized)) is None
+        assert parse_attempts == []
+
+    def test_non_regular_auxiliary_file_refused_unopened(self, parser, tmp_path, monkeypatch):
+        """Only regular files are opened -- a FIFO would block the event loop."""
+        not_a_file = tmp_path / "Market.json"
+        not_a_file.mkdir()
+
+        import src.modules.parser as parser_mod
+
+        open_attempts = []
+        monkeypatch.setattr(
+            parser_mod.Path, "open", lambda self, *a, **k: open_attempts.append(self)
+        )
+
+        assert parser.parse_auxiliary_file(str(not_a_file)) is None
+        assert open_attempts == []

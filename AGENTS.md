@@ -49,6 +49,9 @@ Every activity entry carries a `target` field (`UploadTarget = "eddn" | "edsm"`,
 ### Per-target upload stats
 Upload statistics are a **per-target map** (`{"targets": {"eddn": {...}, "edsm": {...}}, "last_upload_time", "last_upload_event"}`) built in `main.py._build_target_stats()` by iterating the consumer registry (EDDN wired in as one entry; any consumer with `reports_upload_stats = True` contributes under its `name`). No hardcoded per-target keys — a 3rd target is purely additive. `get_status` and the `status_update` emit both carry this map; the frontend renders by mapping over entries. The shared SSL context builder lives in `src/modules/ssl_context.py` (`build_ssl_context()`), reused by both EDDN and EDSM.
 
+### Sidecar and commander guards
+The watched journal directory is a user-settable path that may sit on removable media, so every sidecar file read out of it is untrusted input. `parser.is_parseable_sidecar()` (shared by `parse_auxiliary_file()` and `status_reader`) requires a regular file within `MAX_AUXILIARY_FILE_BYTES` before any `json.load` — a FIFO or device node would block the plugin's single event loop on open. Both keep their never-raises/returns-`None` contract: `status_reader._try_read` catches `Exception`, not just `OSError`/`JSONDecodeError`, so a deeply nested Status.json's `RecursionError` or an oversized one's `MemoryError` cannot escape.
+
 ## Coding Rules
 - Always write tests before (or alongside) implementing a change — prefer delegating test creation to a subagent or specialized agent when available
 - Ensure there is a verifiable way to confirm a change is successful (e.g., passing tests, manual verification steps documented in the task)
