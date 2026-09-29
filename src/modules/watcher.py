@@ -19,6 +19,7 @@ from src.modules.constants import (
     AUXILIARY_FILES,
     DEDICATED_SCHEMA_EVENTS,
     JOURNAL_READ_CHUNK_BYTES,
+    MAX_AUXILIARY_RETRIES_PER_POLL,
     MAX_JOURNAL_FILE_BYTES,
 )
 from src.modules.status_reader import read_status_body_name
@@ -62,6 +63,8 @@ class JournalWatcher:
         # filepath -> reason it was last skipped, so a rejected directory entry
         # is logged once per reason instead of once per poll.
         self._skip_reasons: dict[str, str] = {}
+        # Retry rounds left for auxiliary reads in the current poll cycle.
+        self._auxiliary_retry_budget: int = MAX_AUXILIARY_RETRIES_PER_POLL
         # True while start() is between its guard and its poll task, so a
         # concurrent start() cannot run a second scan while is_running is
         # still false; _stop_requested records a stop() that arrived in that
@@ -143,6 +146,8 @@ class JournalWatcher:
         if not journal_dir.is_dir():
             return
 
+        self._auxiliary_retry_budget = MAX_AUXILIARY_RETRIES_PER_POLL
+
         log_files = self._discover_log_files(journal_dir)
 
         if not log_files:
@@ -222,6 +227,8 @@ class JournalWatcher:
         journal_dir = Path(self._journal_path)
         if not journal_dir.is_dir():
             return
+
+        self._auxiliary_retry_budget = MAX_AUXILIARY_RETRIES_PER_POLL
 
         for log_file in self._discover_log_files(journal_dir):
             filepath = str(log_file)
@@ -587,20 +594,33 @@ class JournalWatcher:
         if auxiliary_path is None:
             return None
 
-        max_attempts = 5
+        # Retries are budgeted per poll cycle, not per event: N events whose
+        # sidecar never appears must not stall ingestion N x delay. The happy
+        # path (ED finishes the write within a retry or two) is unaffected.
+        max_attempts = MAX_AUXILIARY_RETRIES_PER_POLL
         delay = 0.5  # seconds between attempts
+        attempts = 0
         for attempt in range(max_attempts):
+            attempts = attempt + 1
             data = self.parser.parse_auxiliary_file(str(auxiliary_path))
             if data is not None:
                 return data
-            if attempt < max_attempts - 1:
+            if attempt >= max_attempts - 1:
+                break
+            if self._auxiliary_retry_budget <= 0:
                 decky.logger.debug(
-                    f"Auxiliary file {auxiliary_filename} not available yet, "
-                    f"retry {attempt + 1}/{max_attempts}"
+                    f"Auxiliary file {auxiliary_filename} missing and this poll cycle's "
+                    "retry budget is spent, not waiting"
                 )
-                await asyncio.sleep(delay)
+                break
+            self._auxiliary_retry_budget -= 1
+            decky.logger.debug(
+                f"Auxiliary file {auxiliary_filename} not available yet, "
+                f"retry {attempt + 1}/{max_attempts}"
+            )
+            await asyncio.sleep(delay)
 
-        decky.logger.info(f"Auxiliary file {auxiliary_filename} still missing after {max_attempts} attempts")
+        decky.logger.info(f"Auxiliary file {auxiliary_filename} still missing after {attempts} attempts")
         return None
 
     def _resolve_auxiliary_path(self, auxiliary_filename: str, source_filepath: str | None) -> Path | None:
