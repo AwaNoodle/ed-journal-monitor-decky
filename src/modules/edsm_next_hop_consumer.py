@@ -12,7 +12,11 @@ Mirrors ``EdsmLookupConsumer`` but points one hop ahead:
 - When auto-lookups are enabled and a next hop exists, it runs the same
   per-system read (bodies + estimated-value) through the *shared* cache — so a
   hop looked up here is usually a cache hit once it becomes the current system.
-- Fire-and-forget, non-gating, contained on failure.
+- Fire-and-forget, non-gating, contained on failure.  At most
+  ``MAX_CONCURRENT_EDSM_LOOKUPS`` hop lookups may be in flight at once; a hop
+  past that cap preempts (cancels) the oldest in-flight hop lookup rather than
+  being dropped or queued, since only the newest hop is still relevant by the
+  time an older lookup would finish.
 - Scoopability comes from the plotted route, so the preview is emitted even when
   the EDSM lookup is unknown or fails (verdict/value simply stay None) — the
   fuel-safety signal is the reason this preview exists.
@@ -24,6 +28,7 @@ import asyncio
 from typing import TYPE_CHECKING, Callable
 
 import decky
+from src.modules.constants import MAX_CONCURRENT_EDSM_LOOKUPS
 from src.modules.edsm_next_hop import REASON_HOP, NextHop, NextHopTracker
 from src.modules.edsm_read_client import STATUS_UNAVAILABLE, EdsmReadClient
 from src.modules.edsm_system_cache import SystemLookupCache
@@ -83,6 +88,11 @@ class EdsmNextHopConsumer:
         # Dedup key of the last hop acted on: a system name, "" for the neutral
         # (no-hop) state, or None when nothing has been evaluated yet.
         self._last_hop: str | None = None
+        # In-flight hop lookups, oldest first (a dict used as an
+        # insertion-ordered set, so the oldest can be preempted at the cap),
+        # kept separate from the unbounded but short-lived decky-emit tasks so
+        # pending emits never consume a slot.
+        self._lookup_tasks: dict[asyncio.Task, None] = {}
         self._tasks: set[asyncio.Task] = set()
 
     # --- StreamConsumer protocol ---
@@ -122,10 +132,12 @@ class EdsmNextHopConsumer:
         self._last_hop = None
 
     def on_session_stop(self) -> None:
-        """Watcher stopped: cancel in-flight lookups."""
-        for task in list(self._tasks):
+        """Watcher stopped: cancel in-flight lookups and pending emits."""
+        for task in list(self._lookup_tasks) + list(self._tasks):
             if not task.done():
                 task.cancel()
+        self._lookup_tasks.clear()
+        self._tasks.clear()
 
     def reevaluate(self) -> None:
         """Public re-trigger (e.g. after auto-lookups are re-enabled)."""
@@ -161,16 +173,49 @@ class EdsmNextHopConsumer:
         self._fire_lookup(hop)
 
     def _fire_lookup(self, hop: NextHop) -> None:
-        """Schedule a background lookup for the hop (fire-and-forget)."""
+        """Schedule a background lookup for the hop (fire-and-forget).
+
+        The task is held in ``_lookup_tasks`` — both to keep a strong reference
+        while it runs and to bound how many hop lookups may be in flight.  At
+        the cap the oldest in-flight lookup is preempted to make room, so the
+        newest hop always gets its preview.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # No event loop (e.g. in sync tests); run synchronously for testability.
             self._do_lookup_sync(hop)
             return
+        if len(self._lookup_tasks) >= MAX_CONCURRENT_EDSM_LOOKUPS:
+            self._preempt_oldest(hop)
         task = loop.create_task(self._lookup_async(hop))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._lookup_tasks[task] = None
+        task.add_done_callback(self._release_slot)
+
+    def _preempt_oldest(self, hop: NextHop) -> None:
+        """Cancel the oldest in-flight hop lookup so hop can take its slot.
+
+        Refusing the newest hop instead would suppress its preview entirely:
+        ``_reevaluate()`` has already committed the dedup key, so the hop is
+        never retried, and the staleness guard discards every older in-flight
+        result.  The slot is released here rather than in the done callback
+        (which only runs on a later loop iteration) so the cap is never
+        exceeded; the loop keeps the cancelled task alive until its
+        cancellation has been delivered.
+        """
+        oldest = next(iter(self._lookup_tasks), None)
+        if oldest is None:
+            return
+        decky.logger.debug(
+            f"EDSM next-hop lookup for {hop.system!r} preempting the oldest in-flight lookup",
+        )
+        del self._lookup_tasks[oldest]
+        if not oldest.done():
+            oldest.cancel()
+
+    def _release_slot(self, task: asyncio.Task) -> None:
+        """Done callback: free the hop lookup's concurrency slot."""
+        self._lookup_tasks.pop(task, None)
 
     def _do_lookup_sync(self, hop: NextHop) -> None:
         """Synchronous lookup path (used when no event loop is running)."""
