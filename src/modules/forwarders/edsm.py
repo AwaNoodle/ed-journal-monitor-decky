@@ -198,7 +198,7 @@ class EdsmForwarder:
         except Exception as e:
             decky.logger.error(f"EDSM POST error: {e}")
             self._fail_count += len(batch)
-            self._last_msg = str(e)
+            self._last_msg = str(e)[:constants.MAX_SERVER_MESSAGE_CHARS]
             self._notify_stats()
             return None
 
@@ -207,7 +207,8 @@ class EdsmForwarder:
 
     def _handle_response(self, response: EdsmResponse, batch: list[dict]) -> None:
         self._last_msgnum = response.msgnum
-        self._last_msg = response.msg or self._last_msg
+        # Bound server-supplied text: `_last_msg` is surfaced to the frontend.
+        self._last_msg = response.msg[:constants.MAX_SERVER_MESSAGE_CHARS] or self._last_msg
         if response.ok:
             # Terminal success: count and record one activity entry per event.
             self._success_count += len(batch)

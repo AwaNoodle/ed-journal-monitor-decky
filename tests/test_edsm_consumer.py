@@ -410,3 +410,17 @@ class TestRateLimitGate:
         await fwd.flush()
         assert client.post_journal.call_count == 1  # still gated
         assert len(fwd._buffer) == 1  # new event stays buffered
+
+
+class TestServerMessageBounds:
+    @pytest.mark.asyncio
+    async def test_huge_server_msg_truncated_in_stats(self):
+        """`last_msg` is server-supplied text pushed to the frontend."""
+        from src.modules.constants import MAX_SERVER_MESSAGE_CHARS
+
+        client = MagicMock()
+        client.post_journal.return_value = EdsmResponse(msgnum=203, msg="M" * 100_000, fatal=True)
+        fwd = _make_forwarder(discard=set(), client=client, flush_size=100)
+        fwd.observe(_event("FSDJump"), _session())
+        await fwd.flush()
+        assert len(fwd.get_stats()["last_msg"]) == MAX_SERVER_MESSAGE_CHARS

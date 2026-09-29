@@ -32,7 +32,8 @@ if TYPE_CHECKING:
     import ssl
     from collections.abc import Sequence
 
-from src.modules.constants import EDSM_USER_AGENT
+from src.modules.constants import EDSM_USER_AGENT, MAX_SERVER_MESSAGE_CHARS
+from src.modules.http_read import ResponseTooLargeError, read_capped_body
 
 EDSM_JOURNAL_URL = "https://www.edsm.net/api-journal-v1"
 EDSM_DISCARD_URL = "https://www.edsm.net/api-journal-v1/discard"
@@ -111,8 +112,11 @@ class EdsmClient:
                 EDSM_DISCARD_URL, headers={"User-Agent": self._user_agent}, method="GET"
             )
             with urllib.request.urlopen(req, timeout=self._timeout, context=self._ssl_context) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+                data = json.loads(read_capped_body(resp).decode("utf-8"))
+        except Exception as e:
+            # Any unusable response (network error, over-sized/undecodable body,
+            # malformed or pathologically nested JSON) is a failed fetch; the
+            # caller retries with backoff.
             decky.logger.warning(f"EDSM discard fetch failed: {e}")
             return None
         if not isinstance(data, list) or not data:
@@ -155,7 +159,7 @@ class EdsmClient:
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=self._timeout, context=self._ssl_context) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                body = json.loads(read_capped_body(resp).decode("utf-8"))
                 response = self._parse_body(body)
                 self._parse_rate_limit(resp, response)
         except urllib.error.HTTPError as e:
@@ -163,7 +167,7 @@ class EdsmClient:
             response = EdsmResponse(msg=str(e))
             response.transient = e.code >= _HTTP_SERVER_ERROR_MIN
             return response
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ResponseTooLargeError) as e:
             decky.logger.warning(f"EDSM journal POST failed: {e}")
             return EdsmResponse(msg=str(e), transient=True)
 
@@ -175,7 +179,7 @@ class EdsmClient:
         if isinstance(body, dict):
             num = body.get("msgnum")
             response.msgnum = int(num) if isinstance(num, (int, float)) else None
-            response.msg = str(body.get("msg", ""))
+            response.msg = str(body.get("msg", ""))[:MAX_SERVER_MESSAGE_CHARS]
             events = body.get("events")
             if isinstance(events, list):
                 response.events = [e for e in events if isinstance(e, dict)]

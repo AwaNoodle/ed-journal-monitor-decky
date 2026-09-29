@@ -9,6 +9,17 @@ SOFTWARE_VERSION = "0.1.0"
 # User-Agent sent to EDSM (Cloudflare rejects urllib's default UA)
 EDSM_USER_AGENT = "ed-journal-monitor-decky"
 
+# --- Network response limits ------------------------------------------------
+# Response bodies are bounded even though TLS is verified: a compromised or
+# misbehaving endpoint must not be able to exhaust memory on a handheld.
+
+# Most bytes read from any HTTP response body (EDDN and EDSM, all endpoints).
+MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
+
+# Longest server-supplied message retained for logging or forwarding to the
+# frontend (EDDN error bodies, EDSM `msg` strings).
+MAX_SERVER_MESSAGE_CHARS = 500
+
 # Submission targets (used to tag activity log entries and per-target stats).
 # Adding a further target (e.g. Inara) is a one-line addition here plus the
 # consumer's `name`.
