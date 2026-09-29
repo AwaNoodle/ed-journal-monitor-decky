@@ -172,7 +172,8 @@ class TestFilePositions:
 
         asyncio.run(watcher._process_file(str(journal_file)))
 
-        assert watcher._file_positions[str(journal_file)] == 2
+        # Positions are byte offsets: everything consumed.
+        assert watcher._file_positions[str(journal_file)] == journal_file.stat().st_size
 
     def test_incremental_reading(self, watcher, tmp_path):
         """File is written to after initial read - only new lines should be processed."""
@@ -185,7 +186,7 @@ class TestFilePositions:
         import asyncio
 
         asyncio.run(watcher._process_file(str(journal_file)))
-        assert watcher._file_positions[str(journal_file)] == 2
+        assert watcher._file_positions[str(journal_file)] == journal_file.stat().st_size
 
         # Append new content
         journal_file.write_text(
@@ -195,7 +196,7 @@ class TestFilePositions:
         )
 
         asyncio.run(watcher._process_file(str(journal_file)))
-        assert watcher._file_positions[str(journal_file)] == 3
+        assert watcher._file_positions[str(journal_file)] == journal_file.stat().st_size
 
 
 class TestAuxiliaryFileHandling:
@@ -553,7 +554,7 @@ class TestAuxiliaryFileHandling:
         await watcher._process_file(str(journal_file))
 
         # Position should still be updated even if one event failed
-        assert watcher._file_positions[str(journal_file)] == 4
+        assert watcher._file_positions[str(journal_file)] == journal_file.stat().st_size
         # FSDJump submit raises, Scan submit succeeds
         assert watcher.submitter.submit.await_count == 2
 
@@ -599,7 +600,7 @@ class TestInitialScan:
         assert watcher.parser.session_state.commander == "NewCmdr"
         # Older file should have been tracked but not processed
         assert str(yesterday) in watcher._file_positions
-        assert watcher._file_positions[str(yesterday)] == 2  # 2 lines tracked
+        assert watcher._file_positions[str(yesterday)] == yesterday.stat().st_size  # byte offset tracked
 
     @pytest.mark.asyncio
     async def test_first_run_skips_older_files(self, watcher, tmp_path):

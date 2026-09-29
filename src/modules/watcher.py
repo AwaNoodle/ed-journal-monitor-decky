@@ -18,6 +18,7 @@ import decky
 from src.modules.constants import (
     AUXILIARY_FILES,
     DEDICATED_SCHEMA_EVENTS,
+    JOURNAL_READ_CHUNK_BYTES,
     MAX_JOURNAL_FILE_BYTES,
 )
 from src.modules.status_reader import read_status_body_name
@@ -55,7 +56,8 @@ class JournalWatcher:
         self._journal_path: str | None = None
         self._poll_interval: int = 10  # seconds
         self._poll_task: asyncio.Task | None = None
-        self._file_positions: dict[str, int] = {}  # filepath -> last line number
+        # filepath -> byte offset of the first byte not yet dispatched
+        self._file_positions: dict[str, int] = {}
         self._known_files: set[str] = set()
         # filepath -> reason it was last skipped, so a rejected directory entry
         # is logged once per reason instead of once per poll.
@@ -233,31 +235,34 @@ class JournalWatcher:
 
     async def _process_file(self, filepath: str) -> None:
         """
-        Process a journal file, reading only new lines from last position.
+        Process a journal file, reading only new bytes from the last position.
 
-        Position is updated to the end of the file even if some events
-        fail to process, to avoid duplicate submissions on the next poll.
+        The read runs in a worker thread so pathological I/O cannot wedge the
+        event loop, is capped at JOURNAL_READ_CHUNK_BYTES per poll, and yields
+        only newline-terminated lines -- a partially written trailing line is
+        left for the next poll instead of being parsed half-formed.
+
+        The stored offset advances past every byte handed to the parser even if
+        some events fail to process, to avoid duplicate submissions on the next
+        poll.
         """
+        loop = asyncio.get_running_loop()
         try:
-            with Path(filepath).open(encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
+            text, new_position = await loop.run_in_executor(None, self._read_new_lines, filepath)
         except OSError as e:
             decky.logger.error(f"Failed to read {filepath}: {e}")
             return
 
-        last_position = self._file_positions.get(filepath, 0)
-        new_lines = lines[last_position:]
+        self._file_positions[filepath] = new_position
 
-        if not new_lines:
+        if not text:
             return
 
         self._known_files.add(filepath)
 
-        # Always update position to prevent reprocessing on next poll,
-        # even if some events fail to process (avoids duplicate EDDN submissions).
-        self._file_positions[filepath] = len(lines)
-
-        for line in new_lines:
+        # text always ends in the final newline consumed, so the trailing
+        # split element is the empty remainder and never a real line.
+        for line in text.split("\n")[:-1]:
             try:
                 event = self.parser.parse_line(line)
                 if not event:
@@ -279,6 +284,47 @@ class JournalWatcher:
                 # Per-event isolation: one bad event must not prevent
                 # processing of subsequent events in the same file.
                 decky.logger.error(f"Error processing event in {filepath}: {e}")
+
+    def _read_new_lines(self, filepath: str) -> tuple[str, int]:
+        """Read complete new lines from the stored offset. Runs in a thread.
+
+        Returns the decoded text (empty, or ending in a newline) plus the byte
+        offset to store. OSError propagates to the caller, which logs it.
+        """
+        position = self._file_positions.get(filepath, 0)
+        with Path(filepath).open("rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if size < position:
+                # Rotated or truncated in place: start over from the top.
+                decky.logger.info(
+                    f"{Path(filepath).name} shrank to {size} bytes (was at {position}), re-reading from the start"
+                )
+                position = 0
+            if size <= position:
+                return "", position
+            f.seek(position)
+            chunk = f.read(JOURNAL_READ_CHUNK_BYTES)
+
+        if not chunk:
+            return "", position
+
+        last_newline = chunk.rfind(b"\n")
+        if last_newline < 0:
+            if len(chunk) < JOURNAL_READ_CHUNK_BYTES:
+                # A line ED is still writing: leave the offset where it is and
+                # pick the line up complete on the next poll.
+                return "", position
+            # A full chunk with no line break at all is not a journal line.
+            # Discard it and move on -- never re-read the same bytes forever.
+            decky.logger.warning(
+                f"Discarding {len(chunk)} bytes without a line break in {Path(filepath).name}"
+            )
+            return "", position + len(chunk)
+
+        consumed = last_newline + 1
+        # A newline byte never occurs inside a multi-byte UTF-8 sequence, so
+        # cutting the chunk here can never split a character.
+        return chunk[:consumed].decode("utf-8", errors="replace"), position + consumed
 
     def _suspend_consumers(self) -> None:
         """Pause emit on consumers that support coalescing (e.g. session stats)."""
@@ -534,14 +580,12 @@ class JournalWatcher:
         return None
 
     def _track_file_position(self, filepath: str) -> None:
-        """Track a file's line count without processing it (for catch-up skipping)."""
+        """Track a file's byte offset without reading it (catch-up skipping)."""
         try:
-            with Path(filepath).open(encoding="utf-8", errors="replace") as f:
-                line_count = sum(1 for _ in f)
-            self._file_positions[filepath] = line_count
-            self._known_files.add(filepath)
+            self._file_positions[filepath] = Path(filepath).stat().st_size
         except OSError:
-            pass
+            return
+        self._known_files.add(filepath)
 
     def _is_from_today(self, filename: str) -> bool:
         """Check if a journal filename is from today or newer."""
