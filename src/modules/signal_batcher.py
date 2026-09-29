@@ -39,6 +39,17 @@ class SignalBatcher:
     }
 
     def __init__(self) -> None:
+        self._reset()
+
+    def _reset(self) -> None:
+        """Clear every per-batch field, including the system metadata.
+
+        StarSystem/StarPos/SystemAddress are latched from whichever signal
+        first carries them, so they MUST NOT survive a flush: a later batch
+        would otherwise keep a previous system's coordinates, skip the
+        session_state augmentation (its guard only fires when position data
+        is missing) and publish signals under the wrong system.
+        """
         self._signals: list[dict] = []
         self._first_timestamp: str | None = None
         self._system_address: int | None = None
@@ -106,45 +117,51 @@ class SignalBatcher:
         coordinates for cannot be submitted with valid data).
 
         Returns dict with: signals, first_timestamp, system_address,
-        star_system, star_pos. Clears internal state.
+        star_system, star_pos. Clears all internal state, so the next batch
+        derives its position solely from its own signals or from the
+        session_state passed to its own flush.
         """
         if not self._signals:
             return None
 
         star_system = self._star_system
         star_pos = self._star_pos
+        system_address = self._system_address
 
         # Augment from session_state if batch is missing position data.
         # FSSSignalDiscovered events rarely include StarSystem/StarPos,
         # so session_state (from a preceding FSDJump/Location/CarrierJump)
         # is the primary source.
         if session_state is not None and (not star_system or not star_pos):
-            batch_addr = self._system_address
             state_addr = session_state.system_address
             # Only use session_state if SystemAddress matches (prevents
             # stale coordinates from a different star system) or if the
             # batch has no SystemAddress at all
-            if batch_addr is None or state_addr is None or batch_addr == state_addr:
+            if system_address is None or state_addr is None or system_address == state_addr:
                 if not star_pos and session_state.star_pos:
                     star_pos = session_state.star_pos
                 if not star_system and session_state.star_system:
                     star_system = session_state.star_system
+                # SystemAddress is a required message field. A batch whose
+                # signals never carried one takes it from the same
+                # session_state the position came from, rather than emitting
+                # null (real FSSSignalDiscovered events always carry it).
+                if system_address is None and state_addr is not None:
+                    system_address = state_addr
 
         # If we still don't have StarPos/StarSystem after augmentation,
         # discard the batch — we can't submit valid fsssignaldiscovered/1
         # messages without required positional data.
         if not star_pos or not star_system:
-            self._signals = []
-            self._first_timestamp = None
+            self._reset()
             return None
 
         result = {
             "signals": self._signals,
             "first_timestamp": self._first_timestamp,
-            "system_address": self._system_address,
+            "system_address": system_address,
             "star_system": star_system,
             "star_pos": star_pos,
         }
-        self._signals = []
-        self._first_timestamp = None
+        self._reset()
         return result

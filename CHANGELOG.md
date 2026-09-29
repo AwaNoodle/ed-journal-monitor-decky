@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Rapid consecutive jumps no longer leave the panel showing a worth-scanning verdict for an earlier system.
 - A slow or unresponsive EDSM no longer freezes the plugin, and a malformed EDSM reply no longer silently disables forwarding for the rest of the session.
 - The last batch of EDSM uploads is no longer lost when Decky restarts or the plugin reloads while you are still playing.
+- FSSSignalDiscovered batches can no longer be uploaded against the wrong star system after a jump.
 
 ## [0.8.4] - 2026-09-04
 

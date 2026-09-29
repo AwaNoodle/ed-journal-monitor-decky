@@ -509,6 +509,94 @@ class TestFlush:
         batch_data = batcher.flush()  # No session_state
         assert batch_data is None  # Discarded: no position data available
 
+    def test_second_batch_does_not_reuse_previous_system_metadata(self, batcher):
+        """Regression: StarSystem/StarPos/SystemAddress latched by batch 1's
+        signals must not survive the flush. Batch 2's signals carry no position
+        data, so it must take the *current* system from session_state -- never
+        the previous system's name/coordinates."""
+        first = _make_signal_event(
+            SignalName="Signal A",
+            SystemAddress=10477373803,
+            StarSystem="Sol",
+            StarPos=[0.0, 0.0, 0.0],
+        )
+        batcher.add_signal(first)
+        batch_one = batcher.flush(session_state=_make_session_state())
+        assert batch_one["star_system"] == "Sol"
+
+        # Cmdr jumped: signals in the new system carry no message-level fields.
+        raw_no_pos = {
+            "timestamp": "2026-01-12T15:10:00Z",
+            "event": "FSSSignalDiscovered",
+            "SignalName": "Signal B",
+            "SignalType": "USS",
+        }
+        batcher.add_signal(ParsedEvent(
+            raw=raw_no_pos,
+            event_type="FSSSignalDiscovered",
+            timestamp="2026-01-12T15:10:00Z",
+        ))
+        batch_two = batcher.flush(session_state=_make_session_state(
+            system_address=55230754,
+            star_system="Alpha Centauri",
+            star_pos=[3.03, -0.09, 3.15],
+        ))
+        assert batch_two is not None
+        assert batch_two["star_system"] == "Alpha Centauri"
+        assert batch_two["star_pos"] == [3.03, -0.09, 3.15]
+        assert batch_two["system_address"] == 55230754
+        assert batch_two["first_timestamp"] == "2026-01-12T15:10:00Z"
+
+    def test_system_address_cross_check_runs_on_a_later_batch(self, batcher):
+        """The SystemAddress mismatch guard must still bite after an earlier
+        batch flushed: batch 2's signals name a system session_state is not in,
+        so its stale coordinates must be refused and the batch discarded."""
+        batcher.add_signal(_make_signal_event(SignalName="Signal A"))
+        assert batcher.flush(session_state=_make_session_state()) is not None
+
+        raw_other_system = {
+            "timestamp": "2026-01-12T15:10:00Z",
+            "event": "FSSSignalDiscovered",
+            "SystemAddress": 99999,  # not the system session_state is in
+            "SignalName": "Signal B",
+        }
+        batcher.add_signal(ParsedEvent(
+            raw=raw_other_system,
+            event_type="FSSSignalDiscovered",
+            timestamp="2026-01-12T15:10:00Z",
+        ))
+        assert batcher.flush(session_state=_make_session_state()) is None
+
+    def test_discard_path_clears_system_metadata(self, batcher):
+        """A discarded batch must not leave its SystemAddress behind to poison
+        the next batch's cross-check."""
+        raw_mismatch = {
+            "timestamp": "2026-01-12T14:03:00Z",
+            "event": "FSSSignalDiscovered",
+            "SystemAddress": 99999,
+            "SignalName": "Signal A",
+        }
+        batcher.add_signal(ParsedEvent(
+            raw=raw_mismatch,
+            event_type="FSSSignalDiscovered",
+            timestamp="2026-01-12T14:03:00Z",
+        ))
+        assert batcher.flush(session_state=_make_session_state()) is None
+
+        raw_no_pos = {
+            "timestamp": "2026-01-12T14:05:00Z",
+            "event": "FSSSignalDiscovered",
+            "SignalName": "Signal B",
+        }
+        batcher.add_signal(ParsedEvent(
+            raw=raw_no_pos,
+            event_type="FSSSignalDiscovered",
+            timestamp="2026-01-12T14:05:00Z",
+        ))
+        batch = batcher.flush(session_state=_make_session_state())
+        assert batch is not None
+        assert batch["star_system"] == "Sol"
+
 
 class TestShouldFlush:
     """Tests for should_flush method."""
