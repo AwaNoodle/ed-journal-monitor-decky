@@ -9,12 +9,17 @@ import asyncio
 import contextlib
 import os
 import re
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decky
-from src.modules.constants import AUXILIARY_FILES, DEDICATED_SCHEMA_EVENTS
+from src.modules.constants import (
+    AUXILIARY_FILES,
+    DEDICATED_SCHEMA_EVENTS,
+    MAX_JOURNAL_FILE_BYTES,
+)
 from src.modules.status_reader import read_status_body_name
 
 if TYPE_CHECKING:
@@ -52,6 +57,9 @@ class JournalWatcher:
         self._poll_task: asyncio.Task | None = None
         self._file_positions: dict[str, int] = {}  # filepath -> last line number
         self._known_files: set[str] = set()
+        # filepath -> reason it was last skipped, so a rejected directory entry
+        # is logged once per reason instead of once per poll.
+        self._skip_reasons: dict[str, str] = {}
 
     @staticmethod
     def _create_batcher() -> SignalBatcher:
@@ -107,7 +115,7 @@ class JournalWatcher:
         if not journal_dir.is_dir():
             return
 
-        log_files = sorted(journal_dir.glob("Journal*.log"))
+        log_files = self._discover_log_files(journal_dir)
 
         if not log_files:
             return
@@ -168,9 +176,7 @@ class JournalWatcher:
         if not journal_dir.is_dir():
             return
 
-        log_files = sorted(journal_dir.glob("Journal*.log"))
-
-        for log_file in log_files:
+        for log_file in self._discover_log_files(journal_dir):
             filepath = str(log_file)
             if filepath not in self._known_files:
                 # New file detected
@@ -181,6 +187,49 @@ class JournalWatcher:
             except Exception as e:
                 # Per-file isolation: one bad file must not block others
                 decky.logger.error(f"Error processing {filepath}: {e}")
+
+    def _discover_log_files(self, journal_dir: Path) -> list[Path]:
+        """Name-matched journal files that are safe to open.
+
+        The watched directory is user-settable (the Steam library scan reaches
+        removable media), so a name match alone is not enough: anything that is
+        not a regular file of plausible size is rejected before it can be
+        opened. A FIFO would otherwise block open() forever, on the single
+        asyncio loop the whole plugin runs on.
+        """
+        return [p for p in sorted(journal_dir.glob("Journal*.log")) if self._is_usable_journal(p)]
+
+    def _is_usable_journal(self, path: Path) -> bool:
+        """Stat guard: regular file (symlinks followed) within the size cap."""
+        filepath = str(path)
+        try:
+            info = path.stat()
+        except OSError as e:
+            self._log_skip(filepath, "unstattable", f"Skipping {path.name}: cannot stat it ({e})")
+            return False
+
+        if not stat.S_ISREG(info.st_mode):
+            self._log_skip(filepath, "not-regular", f"Skipping {path.name}: not a regular file")
+            return False
+
+        if info.st_size > MAX_JOURNAL_FILE_BYTES:
+            self._log_skip(
+                filepath,
+                "too-large",
+                f"Skipping {path.name}: {info.st_size} bytes exceeds the "
+                f"{MAX_JOURNAL_FILE_BYTES} byte journal limit",
+            )
+            return False
+
+        self._skip_reasons.pop(filepath, None)
+        return True
+
+    def _log_skip(self, filepath: str, reason: str, message: str) -> None:
+        """Warn about a skipped entry once per path per reason, not per poll."""
+        if self._skip_reasons.get(filepath) == reason:
+            return
+        self._skip_reasons[filepath] = reason
+        decky.logger.warning(message)
 
     async def _process_file(self, filepath: str) -> None:
         """

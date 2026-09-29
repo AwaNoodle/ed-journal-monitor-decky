@@ -76,6 +76,15 @@ AUXILIARY_FILES: dict[str, dict[str, str]] = {
 # All auxiliary schemas are now dedicated (none use journal/1)
 AUXILIARY_SCHEMA_EVENTS = set(AUXILIARY_FILES.keys())
 
+# --- Journal directory limits ------------------------------------------------
+# The watched journal directory is a user-settable path (the Steam library
+# scan reaches removable media), so everything read out of it is untrusted
+# input, and every limit here is a named constant, never an inline number.
+
+# Largest journal file the watcher will open. ED rotates journals long before
+# this, so a bigger file is not a journal.
+MAX_JOURNAL_FILE_BYTES = 512 * 1024 * 1024
+
 # Events that use dedicated (non-journal/1, non-auxiliary) EDDN schemas
 # Each entry maps an event type to its schema name and schema ref
 DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {
