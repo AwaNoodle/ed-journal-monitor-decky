@@ -3,8 +3,9 @@ Tests for the watcher's ingestion limits.
 
 The watched directory is a user-settable path (the Steam library scan reaches
 removable media), so its contents are untrusted: discovery must reject anything
-that is not a plausible regular journal file, and reads must be bounded and
-must never block the plugin's single event loop.
+that is not a plausible regular journal file, reads must be bounded and must
+never block the plugin's single event loop, and a failing initial scan must not
+leave the watcher reporting "monitoring" with nothing running.
 """
 
 import asyncio
@@ -239,6 +240,180 @@ class TestIncrementalByteReads:
 
         assert watcher._file_positions[str(journal)] == journal.stat().st_size
         assert str(journal) in watcher._known_files
+
+
+class TestStartupRobustness:
+    """A failing initial scan must not abort start()."""
+
+    @pytest.fixture
+    def runtime_dir(self, tmp_path, monkeypatch):
+        runtime = tmp_path / "runtime"
+        runtime.mkdir()
+        (runtime / "last_active").write_text("2026-01-01T00:00:00+00:00")
+        monkeypatch.setenv("DECKY_PLUGIN_RUNTIME_DIR", str(runtime))
+        return runtime
+
+    @pytest.mark.asyncio
+    async def test_absurd_mtime_does_not_abort_start(self, watcher, tmp_path, runtime_dir):
+        journals = tmp_path / "journals"
+        journals.mkdir()
+
+        poisoned = journals / "Journal.2026-01-12T120000.01.log"
+        poisoned.write_text(FILEHEADER, encoding="utf-8")
+        os.utime(str(poisoned), (10**12, 10**12))
+
+        good = journals / "Journal.2026-01-13T120000.01.log"
+        good.write_text(FILEHEADER + LOADGAME + jump_line("Sol"), encoding="utf-8")
+
+        consumer = RecordingConsumer()
+        watcher._consumers = [consumer]
+
+        await watcher.start(str(journals))
+        try:
+            assert watcher.is_running is True
+            assert watcher._poll_task is not None
+            assert not watcher._poll_task.done()
+            # Only the poisoned file is skipped; its neighbour still replays.
+            assert consumer.systems == ["Sol"]
+        finally:
+            await watcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_scan_failure_still_establishes_the_poll_task(self, watcher, tmp_path, runtime_dir):
+        async def boom(last_active):
+            raise RuntimeError("scan exploded")
+
+        watcher._initial_scan = boom
+
+        await watcher.start(str(tmp_path))
+        try:
+            assert watcher.is_running is True
+            assert watcher._poll_task is not None
+        finally:
+            await watcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_is_running_is_false_until_the_poll_task_exists(self, watcher, tmp_path, runtime_dir):
+        seen = {}
+
+        async def observe(last_active):
+            seen["during_scan"] = watcher.is_running
+            seen["task_during_scan"] = watcher._poll_task
+
+        watcher._initial_scan = observe
+
+        await watcher.start(str(tmp_path))
+        try:
+            # Nothing was polling yet, so nothing reported "monitoring".
+            assert seen["during_scan"] is False
+            assert seen["task_during_scan"] is None
+            assert watcher.is_running is True
+        finally:
+            await watcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_start_does_not_scan_twice(self, watcher, tmp_path, runtime_dir):
+        scans = []
+
+        async def slow_scan(last_active):
+            scans.append(last_active)
+            await asyncio.sleep(0)
+
+        watcher._initial_scan = slow_scan
+
+        await asyncio.gather(watcher.start(str(tmp_path)), watcher.start(str(tmp_path)))
+        try:
+            assert len(scans) == 1
+        finally:
+            await watcher.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_during_the_scan_leaves_nothing_running(self, watcher, tmp_path, runtime_dir):
+        async def scan_then_stopped(last_active):
+            await watcher.stop()
+
+        watcher._initial_scan = scan_then_stopped
+
+        await watcher.start(str(tmp_path))
+
+        assert watcher.is_running is False
+        assert watcher._poll_task is None
+
+
+class TestStopDuringCatchUpReplay:
+    """A stop() during the catch-up replay must stop the uploading too.
+
+    The replay awaits real EDDN submissions (and sidecar retries), so it can
+    outlive the stop_watcher/set_enabled(false) call that already told the user
+    uploading had ceased -- and the EDSM forwarder's final flush has been taken
+    by then, so anything replayed afterwards reaches EDDN but never EDSM.
+    """
+
+    SYSTEMS = (
+        ("Sol", "Alpha Centauri", "Barnard's Star"),
+        ("Wolf 359", "Lalande 21185", "Sirius"),
+        ("Achenar", "Lave", "Diso"),
+    )
+
+    @pytest.fixture
+    def catch_up_dir(self, tmp_path, monkeypatch):
+        """Three journals to replay, all newer than the last-active stamp."""
+        runtime = tmp_path / "runtime"
+        runtime.mkdir()
+        (runtime / "last_active").write_text("2026-01-01T00:00:00+00:00")
+        monkeypatch.setenv("DECKY_PLUGIN_RUNTIME_DIR", str(runtime))
+
+        journals = tmp_path / "journals"
+        journals.mkdir()
+        for index, systems in enumerate(self.SYSTEMS, start=10):
+            (journals / f"Journal.2026-01-{index}T120000.01.log").write_text(
+                FILEHEADER + LOADGAME + "".join(jump_line(system) for system in systems),
+                encoding="utf-8",
+            )
+        return journals
+
+    @staticmethod
+    def _recording_submit(submitted: list[str], on_call=None):
+        async def submit(message, **kwargs):
+            submitted.append(message["message"]["StarSystem"])
+            if on_call is not None:
+                await on_call(len(submitted))
+            return True
+
+        return submit
+
+    @pytest.mark.asyncio
+    async def test_stop_partway_through_the_replay_stops_submitting(self, watcher, catch_up_dir):
+        submitted: list[str] = []
+
+        async def stop_after_first(count):
+            if count == 1:
+                # The user switches monitoring off while the replay is awaiting
+                # this very submission.
+                await watcher.stop()
+
+        watcher.submitter.submit = self._recording_submit(submitted, stop_after_first)
+
+        await watcher.start(str(catch_up_dir))
+
+        # Neither the rest of the file being replayed nor the two files behind
+        # it reach EDDN after stop() returned.
+        assert submitted == ["Sol"]
+        assert watcher.is_running is False
+        assert watcher._poll_task is None
+
+    @pytest.mark.asyncio
+    async def test_replay_without_a_stop_still_covers_every_file(self, watcher, catch_up_dir):
+        submitted: list[str] = []
+        watcher.submitter.submit = self._recording_submit(submitted)
+
+        await watcher.start(str(catch_up_dir))
+        try:
+            assert submitted == [system for systems in self.SYSTEMS for system in systems]
+            assert watcher.is_running is True
+            assert watcher._poll_task is not None
+        finally:
+            await watcher.stop()
 
 
 @pytest.mark.asyncio

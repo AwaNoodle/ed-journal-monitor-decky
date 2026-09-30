@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Codex-entry uploads now identify the body from the game's live status and omit body details when they can't be confirmed, instead of trusting whatever the game journal happened to report.
 - Unusual files in the journal folder (a large file, a pipe, a folder matching the journal name) no longer stall or hang monitoring.
 - Journal events written while the game was mid-line are no longer lost; they are picked up on the next check instead of being skipped.
+- A bad file in the journal folder can no longer leave the panel showing "monitoring" while nothing is being read.
+- Turning off uploading (or stopping the watcher) now takes effect immediately, instead of finishing a catch-up replay first.
 
 ## [0.8.4] - 2026-09-04
 
