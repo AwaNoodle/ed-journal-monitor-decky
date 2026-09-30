@@ -17,6 +17,7 @@ import pytest
 from conftest import MockSettings
 
 import src.modules.watcher as watcher_mod
+from src.modules.constants import MAX_AUXILIARY_RETRIES_PER_POLL
 from src.modules.parser import JournalParser
 from src.modules.submitter import EDDNSubmitter
 from src.modules.validator import EDDNValidator
@@ -414,6 +415,85 @@ class TestStopDuringCatchUpReplay:
             assert watcher._poll_task is not None
         finally:
             await watcher.stop()
+
+
+class TestAuxiliaryRetryBudget:
+    """Retry sleeps are budgeted per poll cycle, not per event."""
+
+    @pytest.fixture
+    def counted_sleep(self, monkeypatch):
+        sleeps = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        monkeypatch.setattr(watcher_mod.asyncio, "sleep", fake_sleep)
+        return sleeps
+
+    @pytest.mark.asyncio
+    async def test_many_missing_sidecars_share_one_budget(self, watcher, tmp_path, counted_sleep):
+        # Six auxiliary events whose sidecar never appears. Per-event retries
+        # would stall the poll for 24 sleeps; the shared budget caps it.
+        journal = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal.write_text(
+            FILEHEADER
+            + LOADGAME
+            + "".join(
+                f'{{"timestamp":"2026-01-12T13:0{i}:00Z","event":"Outfitting","MarketID":12866676{i}}}\n'
+                for i in range(6)
+            ),
+            encoding="utf-8",
+        )
+
+        await watcher._poll()
+
+        assert len(counted_sleep) == MAX_AUXILIARY_RETRIES_PER_POLL
+        watcher.submitter.submit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_budget_resets_each_poll(self, watcher, tmp_path, counted_sleep):
+        journal = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal.write_text(
+            FILEHEADER + LOADGAME + '{"timestamp":"2026-01-12T13:05:00Z","event":"Outfitting","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._poll()
+        first_poll = len(counted_sleep)
+        assert first_poll > 0
+
+        with journal.open("a", encoding="utf-8") as f:
+            f.write('{"timestamp":"2026-01-12T13:06:00Z","event":"Outfitting","MarketID":128666763}\n')
+
+        await watcher._poll()
+
+        assert len(counted_sleep) - first_poll == first_poll
+
+    @pytest.mark.asyncio
+    async def test_sidecar_arriving_on_retry_still_submits(self, watcher, tmp_path, copy_fixture, counted_sleep):
+        # The happy path is unchanged: one retry, then the file is there.
+        original_parse = watcher.parser.parse_auxiliary_file
+        calls = []
+
+        def flaky_parse(filepath):
+            calls.append(filepath)
+            if len(calls) == 1:
+                return None
+            return original_parse(filepath)
+
+        copy_fixture("Outfitting.json")
+        watcher.parser.parse_auxiliary_file = flaky_parse
+
+        journal = tmp_path / "Journal.2026-01-12T120000.01.log"
+        journal.write_text(
+            FILEHEADER + LOADGAME + '{"timestamp":"2026-01-12T13:05:00Z","event":"Outfitting","MarketID":128666762}\n',
+            encoding="utf-8",
+        )
+
+        await watcher._poll()
+
+        assert len(counted_sleep) == 1
+        watcher.submitter.submit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

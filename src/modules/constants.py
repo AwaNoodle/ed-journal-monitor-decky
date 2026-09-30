@@ -89,6 +89,11 @@ MAX_JOURNAL_FILE_BYTES = 512 * 1024 * 1024
 # memory regardless of file size; any remaining tail is read on the next poll.
 JOURNAL_READ_CHUNK_BYTES = 4 * 1024 * 1024
 
+# Retry rounds shared by every auxiliary read in one poll cycle. ED writes the
+# sidecar shortly after the journal line, so a few retries pay off; without a
+# shared budget, N events with a missing sidecar stall ingestion N x delay.
+MAX_AUXILIARY_RETRIES_PER_POLL = 5
+
 # Events that use dedicated (non-journal/1, non-auxiliary) EDDN schemas
 # Each entry maps an event type to its schema name and schema ref
 DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {
