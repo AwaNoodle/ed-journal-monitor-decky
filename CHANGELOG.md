@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Codex-entry uploads now identify the body from the game's live status and omit body details when they can't be confirmed, instead of trusting whatever the game journal happened to report.
+- Unusual files in the journal folder (a large file, a pipe, a folder matching the journal name) no longer stall or hang monitoring.
 
 ## [0.8.4] - 2026-09-04
 
