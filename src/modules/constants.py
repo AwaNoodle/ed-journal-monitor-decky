@@ -85,6 +85,10 @@ AUXILIARY_SCHEMA_EVENTS = set(AUXILIARY_FILES.keys())
 # this, so a bigger file is not a journal.
 MAX_JOURNAL_FILE_BYTES = 512 * 1024 * 1024
 
+# Most bytes consumed from one journal file in one poll cycle. Bounds peak
+# memory regardless of file size; any remaining tail is read on the next poll.
+JOURNAL_READ_CHUNK_BYTES = 4 * 1024 * 1024
+
 # Events that use dedicated (non-journal/1, non-auxiliary) EDDN schemas
 # Each entry maps an event type to its schema name and schema ref
 DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {
