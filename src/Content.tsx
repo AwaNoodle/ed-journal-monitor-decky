@@ -10,6 +10,7 @@ import {
 import { addEventListener, removeEventListener } from "@decky/api";
 import type { JSX, ReactNode } from "react";
 import {
+  clearEdsmCredentials,
   createDiagnosticsBundle,
   findJournalPath,
   getNearestScoopableStar,
@@ -318,6 +319,14 @@ const Content = (): JSX.Element => {
     setEdsmApiKeySet((prev): boolean => prev || edsmApiKeyInput.length > 0);
     setEdsmApiKeyInput("");
     setEdsmSaved(true);
+  };
+
+  const handleClearEdsmCredentials = async (): Promise<void> => {
+    await clearEdsmCredentials();
+    setEdsmApiKeySet(false);
+    setEdsmApiKeyInput("");
+    setEdsmCommanderInput("");
+    setEdsmSaved(false);
   };
 
   const handleRescan = async (): Promise<void> => {
@@ -767,6 +776,7 @@ const Content = (): JSX.Element => {
         <TextField
           label={edsmApiKeySet ? "EDSM API Key (saved — leave blank to keep)" : "EDSM API Key"}
           value={edsmApiKeyInput}
+          bIsPassword
           onChange={(e): void => {
             setEdsmApiKeyInput(e.target.value);
             setEdsmSaved(false);
@@ -780,6 +790,15 @@ const Content = (): JSX.Element => {
           disabled={!edsmCommanderInput || (!edsmApiKeyInput && !edsmApiKeySet)}
         >
           Save EDSM Credentials
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={(): void => { void handleClearEdsmCredentials(); }}
+          disabled={!edsmApiKeySet}
+        >
+          Clear EDSM Credentials
         </ButtonItem>
       </PanelSectionRow>
       {edsmSaved && (

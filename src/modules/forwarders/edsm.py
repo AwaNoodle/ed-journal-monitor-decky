@@ -151,6 +151,20 @@ class EdsmForwarder:
             "queued": len(self._buffer),
         }
 
+    def disarm(self) -> None:
+        """Withdraw consent mid-session: stop forwarding and drop what is buffered.
+
+        Unlike `on_session_start()` (which re-reads the key and rebuilds the
+        session) this leaves the panel's counters and the cached discard list
+        alone — clearing an API key is not a new session, so the session's
+        success/failure totals must survive it. Batches already on the wire are
+        left to settle: cancelling them would abandon a POST that the worker
+        thread is going to make anyway, uncounted and unlogged.
+        """
+        self._active = False
+        self._buffer = []
+        self._cancel_tasks()
+
     # --- flush ---
 
     async def flush(self) -> None:

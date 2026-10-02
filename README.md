@@ -128,7 +128,7 @@ Under **Setup ▸ EDSM account**, enter your commander name as registered on EDS
 
 It is fully isolated from EDDN - bad EDSM credentials surface as a "check your EDSM credentials" message and never affect EDDN submission, or vice versa. Only the Live game version is forwarded. Note that this key is only needed for forwarding; the EDSM lookups above work without one.
 
-The key's settings file is stored with owner-only permissions.
+The key's settings file is stored with owner-only permissions. It is masked as you type it. To withdraw consent, use **Clear EDSM Credentials** in the same section - it erases the stored key and commander name and stops forwarding straight away, without waiting for the next game session.
 
 ### Optional: detailed logging
 

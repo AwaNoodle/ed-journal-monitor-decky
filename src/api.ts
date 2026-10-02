@@ -8,6 +8,7 @@ export const setManualJournalPath = callable<[string], SetManualPathResult>("set
 export const setEnabled = callable<[boolean], SetEnabledResult>("set_enabled");
 export const setUploaderId = callable<[string], SetUploaderIdResult>("set_uploader_id");
 export const setEdsmCredentials = callable<[string, string], SetEdsmCredentialsResult>("set_edsm_credentials");
+export const clearEdsmCredentials = callable<[], ClearEdsmCredentialsResult>("clear_edsm_credentials");
 export const getEdsmCredentials = callable<[], GetEdsmCredentialsResult>("get_edsm_credentials");
 export const setDetailedLogging = callable<[boolean], SetDetailedLoggingResult>("set_detailed_logging");
 export const setEdRunning = callable<[boolean], BasicSuccessResult>("set_ed_running");
