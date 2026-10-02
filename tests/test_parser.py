@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.modules.constants import MAX_AUXILIARY_FILE_BYTES
+from src.modules.constants import MAX_AUXILIARY_FILE_BYTES, MAX_COMMANDER_NAME_LENGTH
 from src.modules.parser import JournalParser, ParsedEvent
 
 
@@ -360,3 +360,44 @@ class TestParseAuxiliaryFile:
 
         assert parser.parse_auxiliary_file(str(not_a_file)) is None
         assert open_attempts == []
+
+
+class TestCommanderValidation:
+    """The LoadGame Commander becomes the public EDDN uploaderID, so a
+    planted journal must not be able to set it to an arbitrary value."""
+
+    def _load_game(self, commander_json: str) -> str:
+        return (
+            '{"timestamp":"2026-01-12T12:01:15Z","event":"LoadGame",'
+            f'"Commander":{commander_json},"Horizons":true,"Odyssey":true}}'
+        )
+
+    def test_plain_name_accepted_verbatim(self, parser):
+        parser.parse_line(self._load_game('"Jameson"'))
+        assert parser.session_state.commander == "Jameson"
+
+    def test_name_at_length_limit_accepted(self, parser):
+        name = "C" * MAX_COMMANDER_NAME_LENGTH
+        parser.parse_line(self._load_game(f'"{name}"'))
+        assert parser.session_state.commander == name
+
+    @pytest.mark.parametrize("commander_json", [
+        '{"nested":"object"}',
+        '["a","list"]',
+        '""',
+        '"   "',
+        '12345',
+        'null',
+        '"' + "C" * 500 + '"',
+    ])
+    def test_implausible_commander_leaves_previous_value(self, parser, commander_json):
+        parser.parse_line(self._load_game('"Jameson"'))
+        parser.parse_line(self._load_game(commander_json))
+        assert parser.session_state.commander == "Jameson"
+
+    def test_implausible_commander_still_sets_horizons_odyssey(self, parser):
+        """The rest of LoadGame is unaffected by a rejected Commander."""
+        parser.parse_line(self._load_game('{"nested":"object"}'))
+        assert parser.session_state.commander == ""
+        assert parser.session_state.horizons is True
+        assert parser.session_state.odyssey is True

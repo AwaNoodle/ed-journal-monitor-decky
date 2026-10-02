@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import decky
-from src.modules.constants import MAX_AUXILIARY_FILE_BYTES, REPORTABLE_EVENTS
+from src.modules.constants import (
+    MAX_AUXILIARY_FILE_BYTES,
+    MAX_COMMANDER_NAME_LENGTH,
+    REPORTABLE_EVENTS,
+)
 
 
 @dataclass
@@ -73,6 +77,10 @@ def is_parseable_sidecar(path: Path) -> bool:
 
     return True
 
+
+def _is_plausible_commander(value: object) -> bool:
+    """Whether a journal ``Commander`` value may become the EDDN uploaderID."""
+    return isinstance(value, str) and 0 < len(value.strip()) <= MAX_COMMANDER_NAME_LENGTH
 
 
 class JournalParser:
@@ -167,14 +175,27 @@ class JournalParser:
 
         Only set horizons/odyssey when the LoadGame event actually carries the
         key: EDDN requires omitting them entirely when unknown, never guessing.
+
+        The commander name becomes the public EDDN ``uploaderID``, so it is
+        accepted only as a plausible name -- a str of 1..
+        MAX_COMMANDER_NAME_LENGTH non-blank characters. Anything else (a
+        planted journal's dict, list, or multi-MB string) leaves the
+        previously known commander in place. The accepted value is stored
+        verbatim, never trimmed: it must reach EDDN exactly as Elite wrote
+        it.
         """
         if "Horizons" in data:
             self.session_state.horizons = data.get("Horizons")
         if "Odyssey" in data:
             self.session_state.odyssey = data.get("Odyssey")
         commander = data.get("Commander", "")
-        if commander:
+        if _is_plausible_commander(commander):
             self.session_state.commander = commander
+        elif commander:
+            decky.logger.debug(
+                f"LoadGame Commander rejected (type {type(commander).__name__}); "
+                "keeping the previous commander name"
+            )
 
     def _update_journal_body(self, data: dict) -> None:
         """Track the current body from ApproachBody/Location/CarrierJump.
