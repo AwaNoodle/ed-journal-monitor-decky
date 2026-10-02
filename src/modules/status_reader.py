@@ -17,6 +17,7 @@ from pathlib import Path
 
 import decky
 from src.modules.constants import STATUS_BODY_MAX_SKEW_SECONDS, STATUS_JSON_FILENAME
+from src.modules.parser import is_parseable_sidecar
 
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 0.1
@@ -70,10 +71,25 @@ async def _read_with_retry(status_path: Path) -> dict | None:
 
 
 def _try_read(status_path: Path) -> dict | None:
+    """One read attempt. Returns None for every failure -- never raises.
+
+    Status.json is refused unparsed by `is_parseable_sidecar` unless it is a
+    regular file no larger than MAX_AUXILIARY_FILE_BYTES, and
+    the parse itself is guarded against every exception, not just OSError
+    and JSONDecodeError: deeply nested JSON raises RecursionError and an
+    oversized one MemoryError, and `read_status_body_name`'s callers rely on
+    this path never failing.
+    """
+    if not is_parseable_sidecar(status_path):
+        return None
+
     try:
         with status_path.open(encoding="utf-8", errors="replace") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
+        return None
+    except Exception as e:
+        decky.logger.warning(f"Status.json could not be parsed: {type(e).__name__}: {e}")
         return None
 
     if not isinstance(data, dict):

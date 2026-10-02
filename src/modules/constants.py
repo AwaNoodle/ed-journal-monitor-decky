@@ -150,3 +150,13 @@ STATUS_JSON_FILENAME = "Status.json"
 # (codexentry-README.md's "BodyID and BodyName" section). See status_reader.py.
 STATUS_BODY_MAX_SKEW_SECONDS = 60
 
+# --- Sidecar file limits -----------------------------------------------------
+# The watched journal directory is a user-settable path, so every sidecar
+# file (Market.json, Outfitting.json, Shipyard.json, NavRoute.json,
+# Status.json) read out of it is untrusted input, skipped rather than read
+# into memory when implausible.
+
+# Largest auxiliary/Status sidecar the parser will parse. Real files are a
+# few hundred KB.
+MAX_AUXILIARY_FILE_BYTES = 16 * 1024 * 1024
+
