@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     import ssl
 
 from src.modules.constants import EDSM_USER_AGENT
+from src.modules.http_read import ResponseTooLargeError, read_capped_body
 
 EDSM_BODIES_URL = "https://www.edsm.net/api-system-v1/bodies"
 EDSM_VALUE_URL = "https://www.edsm.net/api-system-v1/estimated-value"
@@ -129,11 +130,11 @@ class EdsmReadClient:
                 method="GET",
             )
             with urllib.request.urlopen(req, timeout=self._timeout, context=self._ssl_context) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(read_capped_body(resp).decode("utf-8"))
         except urllib.error.HTTPError as e:
             decky.logger.warning(f"EDSM bodies fetch HTTP error for {system_name!r}: {e}")
             return SystemBodiesResult(status=STATUS_UNAVAILABLE, system_name=system_name)
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ResponseTooLargeError) as e:
             decky.logger.warning(f"EDSM bodies fetch failed for {system_name!r}: {e}")
             return SystemBodiesResult(status=STATUS_UNAVAILABLE, system_name=system_name)
 
@@ -155,11 +156,11 @@ class EdsmReadClient:
                 method="GET",
             )
             with urllib.request.urlopen(req, timeout=self._timeout, context=self._ssl_context) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(read_capped_body(resp).decode("utf-8"))
         except urllib.error.HTTPError as e:
             decky.logger.warning(f"EDSM estimated-value fetch HTTP error for {system_name!r}: {e}")
             return SystemValueResult(status=STATUS_UNAVAILABLE, system_name=system_name)
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ResponseTooLargeError) as e:
             decky.logger.warning(f"EDSM estimated-value fetch failed for {system_name!r}: {e}")
             return SystemValueResult(status=STATUS_UNAVAILABLE, system_name=system_name)
 
@@ -185,11 +186,11 @@ class EdsmReadClient:
                 method="GET",
             )
             with urllib.request.urlopen(req, timeout=self._timeout, context=self._ssl_context) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(read_capped_body(resp).decode("utf-8"))
         except urllib.error.HTTPError as e:
             decky.logger.warning(f"EDSM sphere-systems fetch HTTP error for {system_name!r}: {e}")
             return SphereSystemsResult(status=STATUS_UNAVAILABLE, system_name=system_name, radius=radius)
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ResponseTooLargeError) as e:
             decky.logger.warning(f"EDSM sphere-systems fetch failed for {system_name!r}: {e}")
             return SphereSystemsResult(status=STATUS_UNAVAILABLE, system_name=system_name, radius=radius)
 

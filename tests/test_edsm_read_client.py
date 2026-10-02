@@ -170,6 +170,20 @@ class TestContainedFailures:
             result = client.get_system_bodies("Sol")
         assert result.status == STATUS_UNAVAILABLE
 
+    @pytest.mark.parametrize("method", ["get_system_bodies", "get_estimated_value", "get_sphere_systems"])
+    def test_oversized_body_is_unavailable(self, client, method):
+        """One byte over the response cap: contained as unavailable, never read whole."""
+        from src.modules.constants import MAX_HTTP_RESPONSE_BYTES
+
+        resp = MagicMock()
+        resp.read.return_value = b"x" * (MAX_HTTP_RESPONSE_BYTES + 1)
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        with patch("src.modules.edsm_read_client.urllib.request.urlopen", return_value=resp):
+            result = getattr(client, method)("Sol")
+        assert result.status == STATUS_UNAVAILABLE
+        assert resp.read.call_args.args[0] == MAX_HTTP_RESPONSE_BYTES + 1
+
 
 class TestGetEstimatedValue:
     """Tests for the api-system-v1/estimated-value GET (system value lookup)."""

@@ -482,3 +482,50 @@ class TestResetStats:
         submitter.reset_stats()
 
         assert len(log.get_recent()) == 1  # Still present after reset
+
+
+class TestErrorBodyBounds:
+    """The 4xx error body is server-supplied text that lands in plugin.log
+    (and therefore in the user-shared diagnostics bundle)."""
+
+    @staticmethod
+    def _http_error(body: bytes):
+        import io
+        import urllib.error
+
+        return urllib.error.HTTPError(EDDN_URL, 400, "Bad Request", {}, io.BytesIO(body))
+
+    @pytest.mark.asyncio
+    async def test_huge_error_body_is_truncated_in_log(self, submitter):
+        from src.modules.constants import MAX_SERVER_MESSAGE_CHARS
+
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "FSDJump"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = self._http_error(b"E" * 100_000)
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                result = await submitter.submit(message)
+
+        assert result is False
+        logged = mock_decky.logger.error.call_args.args[0]
+        assert "E" * MAX_SERVER_MESSAGE_CHARS in logged
+        assert "E" * (MAX_SERVER_MESSAGE_CHARS + 1) not in logged
+
+    @pytest.mark.asyncio
+    async def test_oversized_error_body_treated_as_unreadable(self, submitter):
+        """One byte over the cap: same outcome as an unreadable body, no exception."""
+        from src.modules.constants import MAX_HTTP_RESPONSE_BYTES
+
+        message = {"$schemaRef": "", "header": {}, "message": {"event": "FSDJump"}}
+
+        with patch("src.modules.submitter.urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = self._http_error(b"E" * (MAX_HTTP_RESPONSE_BYTES + 1))
+            with patch("src.modules.submitter.decky") as mock_decky:
+                mock_decky.emit = AsyncMock()
+                result = await submitter.submit(message)
+
+        assert result is False  # client error: not retried, reported as a failure
+        assert mock_urlopen.call_count == 1
+        assert "unable to read response body" in mock_decky.logger.error.call_args.args[0]
+        assert submitter.get_stats()["fail_count"] == 1

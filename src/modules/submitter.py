@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from src.modules.settings import PluginSettings
 
 from src.modules import constants
+from src.modules.http_read import read_capped_body
 from src.modules.ssl_context import build_ssl_context
 
 # Re-exported for backwards compatibility: the SSL context builder now lives in
@@ -137,6 +138,24 @@ class EDDNSubmitter:
             return "http_error"
         return "network_error"
 
+    @staticmethod
+    def _log_client_error(e: urllib.error.HTTPError) -> None:
+        """Log a non-retryable EDDN client error with a bounded response body.
+
+        The body is capped on read and truncated before it reaches the log,
+        because plugin.log is collected into the user-shared diagnostics
+        bundle -- a hostile body must not be able to inflate either.
+        """
+        try:
+            raw_body = read_capped_body(e)
+        except Exception:
+            # Unreadable or over-sized body -- the status/reason is all the
+            # diagnostic we get.
+            body = "(unable to read response body)"
+        else:
+            body = raw_body.decode("utf-8", errors="replace")[:constants.MAX_SERVER_MESSAGE_CHARS]
+        decky.logger.error(f"EDDN client error {e.code}: {e.reason} — {body}")
+
     async def _submit_with_retry(self, message: dict) -> bool:
         """Submit with exponential backoff retry for transient errors."""
         payload = json.dumps(message).encode("utf-8")
@@ -175,11 +194,7 @@ class EDDNSubmitter:
                     # Client error - don't retry
                     self._last_error_message = e.reason
                     self._last_http_status = e.code
-                    try:
-                        body = e.read().decode("utf-8", errors="replace")
-                    except Exception:
-                        body = "(unable to read response body)"
-                    decky.logger.error(f"EDDN client error {e.code}: {e.reason} — {body}")
+                    self._log_client_error(e)
                     return False
 
                 elif e.code >= HTTP_SERVER_ERROR_MIN:
