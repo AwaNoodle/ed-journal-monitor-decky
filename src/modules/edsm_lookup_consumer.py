@@ -13,6 +13,11 @@ Design principles:
   success or failure.
 - Dedupe: at most one in-flight or completed lookup per system entry per
   session (deduped by the session's current system name).
+- Bounded fan-out: at most ``MAX_CONCURRENT_EDSM_LOOKUPS`` lookups may be in
+  flight at once; an arrival past that cap preempts (cancels) the oldest
+  in-flight lookup rather than being dropped or queued — only the newest
+  arrival matters to the panel, and the staleness guard would discard the
+  older result anyway.
 - Toggle: if edsm_lookups_enabled is False, observe() short-circuits before
   any network call.
 - Bodies and estimated-value are fetched concurrently per arrival (one logical
@@ -28,6 +33,7 @@ import asyncio
 from typing import TYPE_CHECKING, Callable
 
 import decky
+from src.modules.constants import MAX_CONCURRENT_EDSM_LOOKUPS
 from src.modules.edsm_read_client import STATUS_UNAVAILABLE, EdsmReadClient
 from src.modules.edsm_system_cache import SystemLookupCache
 from src.modules.edsm_system_value import derive_value_summary
@@ -65,7 +71,9 @@ class EdsmLookupConsumer:
         self._on_verdict = on_verdict  # optional callback for testing / wiring
         self._on_value = on_value  # optional callback for testing / wiring
         self._last_system: str = ""
-        self._lookup_tasks: set[asyncio.Task] = set()
+        # In-flight lookups, oldest first: a dict used as an insertion-ordered
+        # set, so the oldest can be preempted when the cap is reached.
+        self._lookup_tasks: dict[asyncio.Task, None] = {}
 
     # --- StreamConsumer protocol ---
 
@@ -90,10 +98,11 @@ class EdsmLookupConsumer:
         self._cache.clear()
 
     def on_session_stop(self) -> None:
-        """Watcher stopped: cancel in-flight lookups."""
+        """Watcher stopped: cancel in-flight lookups and release their slots."""
         for task in list(self._lookup_tasks):
             if not task.done():
                 task.cancel()
+        self._lookup_tasks.clear()
 
     def force_lookup(self, system_name: str) -> None:
         """Trigger a lookup for system_name regardless of dedup state.
@@ -112,16 +121,49 @@ class EdsmLookupConsumer:
     # --- internal ---
 
     def _fire_lookup(self, system_name: str) -> None:
-        """Schedule a background lookup for system_name (fire-and-forget)."""
+        """Schedule a background lookup for system_name (fire-and-forget).
+
+        The task is held in ``_lookup_tasks`` — both to keep a strong reference
+        while it runs and to bound how many lookups may be in flight.  At the
+        cap the oldest in-flight lookup is preempted to make room, so the
+        newest arrival always gets a lookup.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # No event loop (e.g. in sync tests); run synchronously for testability.
             self._do_lookup_sync(system_name)
             return
+        if len(self._lookup_tasks) >= MAX_CONCURRENT_EDSM_LOOKUPS:
+            self._preempt_oldest(system_name)
         task = loop.create_task(self._lookup_async(system_name))
-        self._lookup_tasks.add(task)
-        task.add_done_callback(self._lookup_tasks.discard)
+        self._lookup_tasks[task] = None
+        task.add_done_callback(self._release_slot)
+
+    def _preempt_oldest(self, system_name: str) -> None:
+        """Cancel the oldest in-flight lookup so system_name can take its slot.
+
+        Refusing the newest arrival instead would leave the panel with no
+        verdict for the system the player is actually in: the staleness guard
+        compares against the newest arrival, so every older in-flight result
+        would be discarded on arrival.  The slot is released here rather than
+        in the done callback (which only runs on a later loop iteration) so the
+        cap is never exceeded; the loop keeps the cancelled task alive until
+        its cancellation has been delivered.
+        """
+        oldest = next(iter(self._lookup_tasks), None)
+        if oldest is None:
+            return
+        decky.logger.debug(
+            f"EDSM lookup for {system_name!r} preempting the oldest in-flight lookup",
+        )
+        del self._lookup_tasks[oldest]
+        if not oldest.done():
+            oldest.cancel()
+
+    def _release_slot(self, task: asyncio.Task) -> None:
+        """Done callback: free the task's concurrency slot."""
+        self._lookup_tasks.pop(task, None)
 
     def _do_lookup_sync(self, system_name: str) -> None:
         """Synchronous lookup path (used when no event loop is running)."""

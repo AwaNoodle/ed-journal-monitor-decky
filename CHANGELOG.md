@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Journal events written while the game was mid-line are no longer lost; they are picked up on the next check instead of being skipped.
 - A bad file in the journal folder can no longer leave the panel showing "monitoring" while nothing is being read.
 - Turning off uploading (or stopping the watcher) now takes effect immediately, instead of finishing a catch-up replay first.
+- Rapid consecutive jumps no longer leave the panel showing a worth-scanning verdict for an earlier system.
 
 ## [0.8.4] - 2026-09-04
 

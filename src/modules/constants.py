@@ -16,8 +16,9 @@ TARGET_EDDN = "eddn"
 TARGET_EDSM = "edsm"
 
 # --- EDSM lookup bounds ----------------------------------------------------
-# Per-system lookups are driven by journal arrivals, so the cache size is
-# bounded.
+# Per-system lookups are driven by journal arrivals, so both the in-flight
+# task count and the cache size are bounded.
+MAX_CONCURRENT_EDSM_LOOKUPS = 4
 MAX_SYSTEM_CACHE_ENTRIES = 256
 
 UploadTarget = Literal["eddn", "edsm"]
