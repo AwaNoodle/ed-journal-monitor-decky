@@ -113,6 +113,10 @@ npm run lint:py
 - **Install:** Decky Developer mode → Browse → select zip
 - **Do not** copy files directly into `/home/deck/homebrew/plugins/` — it breaks Decky developer mode
 
+### Release guard trust model
+
+The checks in `.github/workflows/release.yml` (`scripts/verify-*.sh`) are fast feedback, not an authority against a malicious tagger. The workflow checks out the tagged commit and runs the guards from that same tree, so anyone who can tag an un-PR'd commit can also rewrite the guards in it. A reusable workflow pinned by SHA does not help, since the `uses:` line comes from the same attacker-chosen ref. The real control is GitHub-side: a tag-protection ruleset on `v*` plus a deployment environment with required reviewers on the release job.
+
 ## Key Files
 
 - `main.py` — Plugin entry point, wires all backend modules
