@@ -148,10 +148,10 @@ If you need to raise an issue, the **Create Diagnostic Bundle** button under **T
 
 | Document | Contents |
 |----------|----------|
-| [developer-guide.md](developer-guide.md) | Architecture, event flow, EDDN event coverage, known limitations |
+| [developer-guide.md](developer-guide.md) | Dev setup, architecture, EDDN/EDSM data flow, event coverage, known limitations |
 | [troubleshooting.md](troubleshooting.md) | Common problems and fixes |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [AGENTS.md](AGENTS.md) | Detailed conventions and module-level design notes |
+| [AGENTS.md](AGENTS.md) | Repo conventions and the invariants changes must preserve |
 
 Events are submitted to `https://eddn.edcd.io:4430/upload/` under `softwareName: ED Journal Monitor Decky`, covering the `journal/1`, `commodity/3`, `outfitting/2`, `shipyard/2`, `navroute/1`, and several dedicated exploration and docking schemas. The full event-to-schema mapping is in the [developer guide](developer-guide.md#eddn-event-coverage).
 
