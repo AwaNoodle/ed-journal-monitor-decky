@@ -26,13 +26,13 @@ Decky Loader embeds Python 3.11 via PyInstaller, which may not find system CA ce
 
 - Auto-detection only works for Steam installs (scans `libraryfolders.vdf`)
 - Non-Steam installs (Lutris, Heroic, flatpak, custom Wine prefixes) require manual path entry
-- If the watcher never starts when ED launches, check that the journal path is set in the Configuration section
+- If the watcher never starts when ED launches, check that the journal path is set in the Setup section
 - Click **Re-scan for Journal Path** to retry auto-detection after installing ED
 
 ### EDDN Submission Failures
 
-- **HTTP 429 (Rate Limited)**: Transient — the plugin retries up to 3 times with exponential backoff. Repeated 429s in Recent Errors means EDDN is throttling; events will eventually succeed.
-- **HTTP 4xx (Client Error)**: Permanent — the event failed validation. Check Recent Errors for the specific error message from EDDN.
+- **HTTP 429 (Rate Limited)**: Transient — the plugin retries up to 3 times with exponential backoff. Repeated 429s in the **Data flow** activity feed means EDDN is throttling; events will eventually succeed.
+- **HTTP 4xx (Client Error)**: Permanent — the event failed validation. Check the **Data flow** activity feed for the specific error message from EDDN.
 - **HTTP 5xx (Server Error)**: Transient — EDDN is having issues. The plugin retries automatically.
 - **Network Error**: Check your internet connection. The plugin retries automatically.
 
@@ -40,8 +40,8 @@ Decky Loader embeds Python 3.11 via PyInstaller, which may not find system CA ce
 
 - Game lifecycle detection requires `SteamClient.GameSessions` which may be unavailable on some SteamOS versions — the plugin logs a warning but doesn't show this in the UI
 - If ED was already running when the plugin loaded, it uses `/proc` scanning and journal file modification time heuristics to detect this
-- As a workaround, you can manually toggle the **Enabled** switch off/on to trigger watcher startup
+- As a workaround, you can manually toggle the **Watch journal** switch off/on to trigger watcher startup
 
 ### Watcher Not Starting After System Resume
 
-The plugin registers for suspend/resume notifications and checks consistency on resume. If the watcher is stale after resuming your Deck while ED is running, try toggling **Enabled** off and back on.
+The plugin registers for suspend/resume notifications and checks consistency on resume. If the watcher is stale after resuming your Deck while ED is running, try toggling **Watch journal** off and back on.

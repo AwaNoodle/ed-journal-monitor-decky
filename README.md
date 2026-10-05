@@ -126,7 +126,7 @@ The plugin can forward your journal to your [EDSM](https://www.edsm.net/) comman
 
 Under **Setup ▸ EDSM account**, enter your commander name as registered on EDSM, and an API key from [Settings → My API Key](https://www.edsm.net/en/settings/api). Forwarding activates on the next game session.
 
-It is fully isolated from EDDN - bad EDSM credentials surface as a "check your EDSM credentials" message and never affect EDDN submission, or vice versa. Only the Live game version is forwarded. Note that this key is only needed for forwarding; the EDSM lookups above work without one.
+It is fully isolated from EDDN - bad EDSM credentials show up as failed EDSM uploads in **Data flow** and never affect EDDN submission, or vice versa. Only the Live game version is forwarded. Note that this key is only needed for forwarding; the EDSM lookups above work without one.
 
 The key's settings file is stored with owner-only permissions. It is masked as you type it. To withdraw consent, use **Clear EDSM Credentials** in the same section - it erases the stored key and commander name and stops forwarding straight away, without waiting for the next game session.
 
@@ -167,7 +167,12 @@ npm run build               # bundle frontend to dist/
 npm run package             # build + zip into ed-journal-monitor.zip
 ```
 
-Python 3.9+ is required for the backend, which uses the standard library only - no pip packages at runtime.
+Python 3.9+ is required for the backend, which uses the standard library only - no pip packages at runtime. To run the Python tests and linter below, set up a dev virtualenv once:
+
+```bash
+python3.9 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt   # ruff, pytest, pytest-asyncio, jsonschema - dev only
+```
 
 ### Before you open a PR
 
