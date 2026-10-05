@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-05
+
 ### Added
 
 - **Clear EDSM Credentials** button in Setup ▸ EDSM account, so you can withdraw consent for identifiable EDSM uploads without hand-editing files. It stops forwarding immediately.
