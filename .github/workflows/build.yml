@@ -8,7 +8,8 @@ on:
 
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-26.04 (ubuntu-latest) has no Python 3.9, our CI floor.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v7
