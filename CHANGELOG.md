@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-08
+
 ### Fixed
 
 - Updating or reloading the plugin while the game is running no longer leaves uploads without the game version and Horizons/Odyssey flags for the rest of the session.
