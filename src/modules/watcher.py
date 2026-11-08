@@ -140,7 +140,8 @@ class JournalWatcher:
         to capture Fileheader/LoadGame session state (game version, commander,
         horizons/odyssey flags), then tracks all other files for position only.
         On catch-up (with last_active), processes files modified after the
-        last-active timestamp.
+        last-active timestamp; if the newest file was not modified, its session
+        state is restored without re-sending its events.
         """
         journal_dir = Path(self._journal_path)
         if not journal_dir.is_dir():
@@ -192,9 +193,14 @@ class JournalWatcher:
             except ValueError:
                 last_active_dt = None
             if last_active_dt is not None and file_mtime < last_active_dt:
-                # File hasn't been modified since last session, skip
-                # But still track it for position
-                self._track_file_position(str(log_file))
+                # Already handled by the previous run: never re-send or re-count it.
+                if is_newest:
+                    # A reload mid-session (plugin update, Decky restart) while
+                    # the game is idle: the session's Fileheader/LoadGame live
+                    # only in this file, so rebuild session state from it.
+                    await self._restore_session_state(str(log_file))
+                else:
+                    self._track_file_position(str(log_file))
                 return
             await self._process_file(str(log_file))
         elif is_newest:
@@ -345,13 +351,44 @@ class JournalWatcher:
                 # processing of subsequent events in the same file.
                 decky.logger.error(f"Error processing event in {filepath}: {e}")
 
+    async def _restore_session_state(self, filepath: str) -> None:
+        """Parse a whole journal file for session state only.
+
+        Each line goes through the parser, which records game version, build,
+        horizons/odyssey, commander, position and current body, but nothing is
+        fanned out or submitted. Reads use the same capped, threaded chunks as
+        _process_file, and the stored offset ends after the last complete line,
+        so a line the game is still writing is dispatched once it completes.
+        """
+        loop = asyncio.get_running_loop()
+        position = 0
+        while not self._stop_requested:
+            try:
+                text, new_position = await loop.run_in_executor(None, self._read_lines_from, filepath, position)
+            except OSError as e:
+                decky.logger.error(f"Failed to read {filepath}: {e}")
+                return
+            if new_position == position:
+                break
+            position = new_position
+            for line in text.split("\n")[:-1]:
+                try:
+                    self.parser.parse_line(line)
+                except Exception as e:
+                    decky.logger.error(f"Error restoring session state from {filepath}: {e}")
+        self._file_positions[filepath] = position
+        self._known_files.add(filepath)
+
     def _read_new_lines(self, filepath: str) -> tuple[str, int]:
-        """Read complete new lines from the stored offset. Runs in a thread.
+        """Read complete new lines from the stored offset. Runs in a thread."""
+        return self._read_lines_from(filepath, self._file_positions.get(filepath, 0))
+
+    def _read_lines_from(self, filepath: str, position: int) -> tuple[str, int]:
+        """Read complete lines starting at byte `position`. Runs in a thread.
 
         Returns the decoded text (empty, or ending in a newline) plus the byte
         offset to store. OSError propagates to the caller, which logs it.
         """
-        position = self._file_positions.get(filepath, 0)
         with Path(filepath).open("rb") as f:
             size = os.fstat(f.fileno()).st_size
             if size < position:

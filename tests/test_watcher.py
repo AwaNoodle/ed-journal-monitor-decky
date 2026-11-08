@@ -4,6 +4,7 @@ Tests position tracking, incremental reading, auxiliary file handling,
 and dedicated EDDN schema routing.
 """
 
+import os
 from unittest.mock import AsyncMock
 
 import pytest
@@ -638,6 +639,80 @@ class TestInitialScan:
         await watcher._initial_scan(last_active="2026-01-11T00:00:00+00:00")
 
         assert watcher.parser.session_state.game_version == "4.3.0.1"
+
+    @staticmethod
+    def _write_idle_session(path, mtime):
+        """A journal mid-session that the game has not written since `mtime`."""
+        path.write_text(
+            '{"timestamp":"2026-11-08T17:01:18Z","event":"Fileheader","part":1,'
+            '"gameversion":"4.4.2.1","build":"r334925/r0 "}\n'
+            '{"timestamp":"2026-11-08T17:02:01Z","event":"LoadGame","Commander":"Noodle","Horizons":true,"Odyssey":true}\n'
+            '{"timestamp":"2026-11-08T18:10:00Z","event":"FSDJump","StarSystem":"Procyon","SystemAddress":2,"StarPos":[-4.9,4.0,-10.7]}\n'
+        )
+        os.utime(path, (mtime, mtime))
+
+    @pytest.mark.asyncio
+    async def test_reload_restores_session_state_from_idle_newest_file(self, watcher, tmp_path):
+        """A reload mid-session restores session state even if the game wrote nothing since the stop.
+
+        Without it every upload until the next game restart carries an empty
+        gameversion/gamebuild and omits horizons/odyssey.
+        """
+        journal = tmp_path / "Journal.2026-11-08T170126.01.log"
+        self._write_idle_session(journal, mtime=1_762_628_410)  # 19:00:10Z, before last_active
+        watcher._journal_path = str(tmp_path)
+
+        await watcher._initial_scan(last_active="2026-11-08T19:00:38.662132+00:00")
+
+        state = watcher.parser.session_state
+        assert (state.game_version, state.game_build) == ("4.4.2.1", "r334925/r0 ")
+        assert (state.horizons, state.odyssey) == (True, True)
+        assert state.star_system == "Procyon"
+        assert state.star_pos == [-4.9, 4.0, -10.7]
+
+    @pytest.mark.asyncio
+    async def test_reload_does_not_resend_or_refan_idle_newest_file(self, watcher, tmp_path):
+        """Restoring state from the idle file must not re-upload or re-count events the last run already handled."""
+        consumer = RecordingConsumer()
+        watcher._consumers = [consumer]
+        watcher.submitter.submit = AsyncMock(return_value=True)
+        journal = tmp_path / "Journal.2026-11-08T170126.01.log"
+        self._write_idle_session(journal, mtime=1_762_628_410)
+        watcher._journal_path = str(tmp_path)
+
+        await watcher._initial_scan(last_active="2026-11-08T19:00:38.662132+00:00")
+
+        watcher.submitter.submit.assert_not_called()
+        assert consumer.observed == []
+
+        # Lines the game writes after the reload are still picked up exactly once.
+        with journal.open("a") as f:
+            f.write('{"timestamp":"2026-11-08T19:10:13Z","event":"FSDJump","StarSystem":"Sirius","SystemAddress":3,"StarPos":[6.2,-1.3,-5.8]}\n')
+        await watcher._process_file(str(journal))
+
+        assert consumer.observed == ["FSDJump"]
+        assert watcher.submitter.submit.await_count == 1
+        assert watcher.submitter.submit.await_args.kwargs["game_version"] == "4.4.2.1"
+
+    @pytest.mark.asyncio
+    async def test_reload_only_restores_state_from_the_newest_idle_file(self, watcher, tmp_path):
+        """Older idle files stay position-only; session state comes from the newest file."""
+        older = tmp_path / "Journal.2026-11-07T100000.01.log"
+        older.write_text(
+            '{"timestamp":"2026-11-07T10:00:00Z","event":"Fileheader","gameversion":"4.4.1.0","build":"r330000/r0"}\n'
+            '{"timestamp":"2026-11-07T10:01:00Z","event":"LoadGame","Commander":"Noodle","Horizons":true,"Odyssey":false}\n'
+        )
+        os.utime(older, (1_762_509_660, 1_762_509_660))
+        newest = tmp_path / "Journal.2026-11-08T170126.01.log"
+        self._write_idle_session(newest, mtime=1_762_628_410)
+        watcher._journal_path = str(tmp_path)
+
+        await watcher._initial_scan(last_active="2026-11-08T19:00:38.662132+00:00")
+
+        assert watcher.parser.session_state.game_version == "4.4.2.1"
+        assert watcher.parser.session_state.odyssey is True
+        assert watcher._file_positions[str(older)] == older.stat().st_size
+        assert watcher._file_positions[str(newest)] == newest.stat().st_size
 
     @pytest.mark.asyncio
     async def test_game_version_in_submission_header(self, watcher, tmp_path, copy_fixture):
