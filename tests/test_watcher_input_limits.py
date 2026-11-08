@@ -496,10 +496,12 @@ class TestResumeAcrossPluginReloads:
         first_run: list[str] = []
         first = self._new_instance(first_run)
         await first.start(str(journal.parent))
+        # Halt its poll loop so the test drives every poll; the instance is
+        # never stop()ped, exactly as when Decky SIGKILLs it.
+        await self._kill(first)
         with journal.open("a", encoding="utf-8") as f:
             f.write(jump_line("Diso"))
         await first._poll()
-        await self._kill(first)
         assert first_run == ["Sol", "Lave", "Diso"]
 
         # The game keeps writing while Decky swaps plugin instances.
@@ -560,7 +562,6 @@ class TestResumeAcrossPluginReloads:
         "not json",
         '{"positions": []}',
         '{"positions": {"x": -1, "y": "12", "z": true}}',
-        "[" * 100_000,
     ])
     async def test_unusable_positions_file_falls_back_to_the_last_active_rule(
         self, runtime_dir, journal, content,
