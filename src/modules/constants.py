@@ -112,6 +112,10 @@ JOURNAL_READ_CHUNK_BYTES = 4 * 1024 * 1024
 # shared budget, N events with a missing sidecar stall ingestion N x delay.
 MAX_AUXILIARY_RETRIES_PER_POLL = 5
 
+# Largest saved journal-positions file the watcher will load. One entry per
+# journal is ~150 bytes, so this covers tens of thousands of journals.
+MAX_JOURNAL_POSITIONS_FILE_BYTES = 4 * 1024 * 1024
+
 # Events that use dedicated (non-journal/1, non-auxiliary) EDDN schemas
 # Each entry maps an event type to its schema name and schema ref
 DEDICATED_SCHEMA_EVENTS: dict[str, dict[str, str]] = {

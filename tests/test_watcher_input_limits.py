@@ -9,6 +9,7 @@ leave the watcher reporting "monitoring" with nothing running.
 """
 
 import asyncio
+import contextlib
 import os
 import time
 from unittest.mock import AsyncMock
@@ -438,6 +439,164 @@ class TestStopDuringCatchUpReplay:
             assert watcher._poll_task is not None
         finally:
             await watcher.stop()
+
+
+class TestResumeAcrossPluginReloads:
+    """A new plugin instance resumes where the last one stopped reading, however that one ended.
+
+    Decky SIGKILLs a plugin that has not unloaded within 5 s, so the previous
+    instance may never reach stop(). Re-reading the active journal from byte 0
+    would re-upload the whole session.
+    """
+
+    @pytest.fixture
+    def runtime_dir(self, tmp_path, monkeypatch):
+        runtime = tmp_path / "runtime"
+        runtime.mkdir()
+        # Stale: older than every journal, as when the last unload was killed.
+        (runtime / "last_active").write_text("2026-01-01T00:00:00+00:00")
+        monkeypatch.setenv("DECKY_PLUGIN_RUNTIME_DIR", str(runtime))
+        return runtime
+
+    @pytest.fixture
+    def journal(self, tmp_path):
+        journals = tmp_path / "journals"
+        journals.mkdir()
+        path = journals / "Journal.2026-01-12T120000.01.log"
+        path.write_text(FILEHEADER + LOADGAME + jump_line("Sol") + jump_line("Lave"), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _new_instance(submitted: list[str]) -> JournalWatcher:
+        from src.modules.signal_batcher import SignalBatcher
+
+        async def submit(message, **kwargs):
+            submitted.append(message["message"]["StarSystem"])
+            return True
+
+        instance = JournalWatcher(
+            settings=MockSettings(),
+            parser=JournalParser(),
+            validator=EDDNValidator(),
+            submitter=EDDNSubmitter(MockSettings()),
+            signal_batcher=SignalBatcher(),
+        )
+        instance.submitter.submit = submit
+        return instance
+
+    @staticmethod
+    async def _kill(instance: JournalWatcher) -> None:
+        """End an instance the way SIGKILL does: no stop(), nothing persisted on the way out."""
+        instance._poll_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await instance._poll_task
+
+    @pytest.mark.asyncio
+    async def test_restart_after_a_killed_unload_sends_only_new_lines(self, runtime_dir, journal):
+        first_run: list[str] = []
+        first = self._new_instance(first_run)
+        await first.start(str(journal.parent))
+        with journal.open("a", encoding="utf-8") as f:
+            f.write(jump_line("Diso"))
+        await first._poll()
+        await self._kill(first)
+        assert first_run == ["Sol", "Lave", "Diso"]
+
+        # The game keeps writing while Decky swaps plugin instances.
+        with journal.open("a", encoding="utf-8") as f:
+            f.write(jump_line("Achenar"))
+
+        second_run: list[str] = []
+        second = self._new_instance(second_run)
+        await second.start(str(journal.parent))
+        try:
+            assert second_run == ["Achenar"]
+            assert second.parser.session_state.game_version == "4.3.0.1"
+            assert second.parser.session_state.odyssey is True
+        finally:
+            await second.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_persists_state_even_if_the_poll_task_will_not_finish(self, runtime_dir, journal):
+        submitted: list[str] = []
+        first = self._new_instance(submitted)
+        await first.start(str(journal.parent))
+        await self._kill(first)
+
+        release = asyncio.Event()
+
+        async def stuck_poll():
+            # Stands in for whatever kept the poll task alive past Decky's 5 s unload budget on device.
+            while True:
+                try:
+                    await release.wait()
+                    return
+                except asyncio.CancelledError:
+                    continue
+
+        first._poll_task = asyncio.create_task(stuck_poll())
+        await asyncio.sleep(0)
+        stopping = asyncio.ensure_future(first.stop())
+        await asyncio.sleep(0.05)
+        try:
+            assert not stopping.done()
+            assert (runtime_dir / "last_active").read_text() > "2026-01-01T00:00:00+00:00"
+
+            with journal.open("a", encoding="utf-8") as f:
+                f.write(jump_line("Achenar"))
+            later: list[str] = []
+            second = self._new_instance(later)
+            await second.start(str(journal.parent))
+            try:
+                assert later == ["Achenar"]
+            finally:
+                await second.stop()
+        finally:
+            release.set()
+            await stopping
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", [
+        "not json",
+        '{"positions": []}',
+        '{"positions": {"x": -1, "y": "12", "z": true}}',
+        "[" * 100_000,
+    ])
+    async def test_unusable_positions_file_falls_back_to_the_last_active_rule(
+        self, runtime_dir, journal, content,
+    ):
+        (runtime_dir / "journal_positions.json").write_text(content, encoding="utf-8")
+        submitted: list[str] = []
+        instance = self._new_instance(submitted)
+
+        await instance.start(str(journal.parent))
+        try:
+            assert submitted == ["Sol", "Lave"]
+            assert instance.is_running is True
+        finally:
+            await instance.stop()
+
+    @pytest.mark.asyncio
+    async def test_without_saved_offsets_only_events_after_last_active_are_sent(self, runtime_dir, journal):
+        """Upgrading from a version that saved no offsets must not re-send the session either.
+
+        The journal was written after last_active, so the file counts as
+        modified, but its events up to last_active were sent by the old version.
+        """
+        (runtime_dir / "last_active").write_text("2026-01-12T12:30:00.500000+00:00")
+        with journal.open("a", encoding="utf-8") as f:
+            f.write(jump_line("Achenar", timestamp="2026-01-12T12:30:00Z"))
+            f.write(jump_line("Diso", timestamp="2026-01-12T12:31:00Z"))
+        submitted: list[str] = []
+        instance = self._new_instance(submitted)
+
+        await instance.start(str(journal.parent))
+        try:
+            assert submitted == ["Diso"]
+            assert instance.parser.session_state.game_version == "4.3.0.1"
+            assert instance.parser.session_state.odyssey is True
+        finally:
+            await instance.stop()
 
 
 class TestAuxiliaryRetryBudget:
