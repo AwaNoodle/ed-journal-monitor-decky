@@ -29,6 +29,7 @@ It is user-settable and may sit on removable media.
 - Every limit is a named constant in `constants.py`, never an inline number.
 - Before opening any file from it, require a regular file (`stat.S_ISREG`, which follows symlinks) within its size cap — opening a FIFO or device blocks the plugin's single event loop forever. Journals: `watcher._is_usable_journal()`; sidecars: `parser.is_parseable_sidecar()`.
 - `_file_positions` are **byte offsets**. Reads are capped chunks (`JOURNAL_READ_CHUNK_BYTES`) in a thread executor; only newline-terminated lines are dispatched. A file smaller than its stored offset is treated as rotated.
+- Read offsets are persisted to the runtime dir after every poll, and `stop()` persists them and `last_active` **before** awaiting the poll task. Decky SIGKILLs a plugin that hasn't unloaded within 5 s; state saved only at the end of `stop()` is lost, and the next instance re-sends the session. A catch-up without saved offsets dispatches only events timestamped after `last_active`.
 - `start()` sets `is_running` only once the initial scan has run and the poll task exists. `_stop_requested` is checked per file **and** per line during the catch-up replay, because the replay awaits real submissions.
 - Sidecar readers never raise and return `None` on failure; `status_reader._try_read` catches `Exception` (`RecursionError`/`MemoryError` included).
 - `Commander` is stored only when it is a `str` of stripped length 1..`MAX_COMMANDER_NAME_LENGTH` — it becomes the public EDDN `uploaderID`.

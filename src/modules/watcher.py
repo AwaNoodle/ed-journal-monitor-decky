@@ -7,6 +7,7 @@ Polls the ED journal directory for new/changed files and processes events.
 
 import asyncio
 import contextlib
+import json
 import os
 import re
 import stat
@@ -21,6 +22,7 @@ from src.modules.constants import (
     JOURNAL_READ_CHUNK_BYTES,
     MAX_AUXILIARY_RETRIES_PER_POLL,
     MAX_JOURNAL_FILE_BYTES,
+    MAX_JOURNAL_POSITIONS_FILE_BYTES,
 )
 from src.modules.status_reader import read_status_body_name
 
@@ -60,6 +62,16 @@ class JournalWatcher:
         # filepath -> byte offset of the first byte not yet dispatched
         self._file_positions: dict[str, int] = {}
         self._known_files: set[str] = set()
+        # Offsets loaded at start() from the previous plugin instance, so a
+        # reload resumes reading instead of re-sending what that instance sent.
+        self._resume_positions: dict[str, int] = {}
+        # Journals found by the latest scan; only these offsets are persisted.
+        self._discovered: set[str] = set()
+        # Offsets as last written to disk, so an idle poll writes nothing.
+        self._persisted_positions: dict[str, int] = {}
+        # During a catch-up replay, journal timestamp at or before which events
+        # update session state but are not dispatched (already sent).
+        self._dispatch_after: str | None = None
         # filepath -> reason it was last skipped, so a rejected directory entry
         # is logged once per reason instead of once per poll.
         self._skip_reasons: dict[str, str] = {}
@@ -92,8 +104,9 @@ class JournalWatcher:
             self._journal_path = journal_path
             self._poll_interval = self.settings.get("poll_interval", 10)
 
-            # Load persisted last-active timestamp for catch-up
+            # Load persisted state for catch-up
             last_active = self._load_last_active()
+            self._resume_positions = self._load_positions()
 
             # Initial scan: process files from catch-up or current date.
             # A failing scan must not abort startup -- the poll loop is what
@@ -106,6 +119,7 @@ class JournalWatcher:
             if self._stop_requested:
                 # stop() arrived while the scan was awaiting: honour it rather
                 # than leaving a poll loop nobody asked for.
+                self._save_positions()
                 decky.logger.info("Journal watcher stopped during initial scan")
                 return
 
@@ -123,21 +137,27 @@ class JournalWatcher:
         if self._starting:
             self._stop_requested = True
         self.is_running = False
+        # Persist before waiting on the poll task: Decky SIGKILLs a plugin that
+        # takes more than 5 s to unload, and this state is what stops the next
+        # instance re-sending the session. Lines the cancelled poll had not
+        # dispatched yet are abandoned, the same forward-only contract as a
+        # failed event.
+        self._save_positions()
+        self._save_last_active()
         if self._poll_task:
             self._poll_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._poll_task
             self._poll_task = None
-
-        # Persist last-active timestamp
-        self._save_last_active()
         decky.logger.info("Journal watcher stopped")
 
     async def _initial_scan(self, last_active: str | None) -> None:
         """Process journal files on watcher start for catch-up.
 
-        On first run (no last_active), processes the MOST RECENT journal file
-        to capture Fileheader/LoadGame session state (game version, commander,
+        A journal with an offset saved by the previous plugin instance resumes
+        from that offset, whatever its mtime. Otherwise: on first run (no
+        last_active), processes the MOST RECENT journal file to capture
+        Fileheader/LoadGame session state (game version, commander,
         horizons/odyssey flags), then tracks all other files for position only.
         On catch-up (with last_active), processes files modified after the
         last-active timestamp; if the newest file was not modified, its session
@@ -150,6 +170,7 @@ class JournalWatcher:
         self._auxiliary_retry_budget = MAX_AUXILIARY_RETRIES_PER_POLL
 
         log_files = self._discover_log_files(journal_dir)
+        self._discovered = {str(p) for p in log_files}
 
         if not log_files:
             return
@@ -161,6 +182,7 @@ class JournalWatcher:
             await self._replay_initial_scan(log_files, last_active)
         finally:
             self._resume_consumers()
+        self._save_positions()
 
     async def _replay_initial_scan(self, log_files: list[Path], last_active: str | None) -> None:
         """Replay journal files on watcher start (see _initial_scan).
@@ -185,6 +207,11 @@ class JournalWatcher:
 
     async def _replay_one(self, log_file: Path, last_active: str | None, is_newest: bool) -> None:
         """Replay a single journal file during the initial scan."""
+        filepath = str(log_file)
+        resume_at = self._resume_positions.get(filepath)
+        if resume_at is not None and resume_at <= log_file.stat().st_size:
+            await self._resume_file(filepath, resume_at, is_newest)
+            return
         if last_active:
             # Catch-up: process files modified after last-active timestamp
             file_mtime = datetime.fromtimestamp(log_file.stat().st_mtime, tz=timezone.utc)
@@ -202,7 +229,10 @@ class JournalWatcher:
                 else:
                     self._track_file_position(str(log_file))
                 return
-            await self._process_file(str(log_file))
+            if last_active_dt is None:
+                await self._process_file(filepath)
+            else:
+                await self._process_file_after(filepath, last_active_dt)
         elif is_newest:
             # First run: process ONLY the most recent file to capture
             # Fileheader/LoadGame session state (game version, commander,
@@ -215,6 +245,36 @@ class JournalWatcher:
             # First run: older files are not processed, but track their
             # position so the poll loop knows we've seen them.
             self._track_file_position(str(log_file))
+
+    async def _resume_file(self, filepath: str, resume_at: int, is_newest: bool) -> None:
+        """Continue a journal from the offset the previous instance saved.
+
+        That instance read up to here, even if it was killed before stop().
+        Session state is rebuilt from what it read; only what the game wrote
+        since is dispatched.
+        """
+        if is_newest:
+            await self._restore_session_state(filepath, limit=resume_at)
+        self._file_positions[filepath] = resume_at
+        self._known_files.add(filepath)
+        await self._process_file(filepath)
+
+    async def _process_file_after(self, filepath: str, last_active: datetime) -> None:
+        """Read a whole journal, dispatching only events after `last_active`.
+
+        Earlier events were sent by the previous instance, including versions
+        that saved no offsets; they still update session state. The whole file
+        is read now, so no old line is left for a poll without the cutoff.
+        """
+        self._dispatch_after = last_active.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            while not self._stop_requested:
+                before = self._file_positions.get(filepath, 0)
+                await self._process_file(filepath)
+                if self._file_positions.get(filepath, 0) == before:
+                    break
+        finally:
+            self._dispatch_after = None
 
     async def _poll_loop(self) -> None:
         """Periodic polling loop."""
@@ -236,7 +296,9 @@ class JournalWatcher:
 
         self._auxiliary_retry_budget = MAX_AUXILIARY_RETRIES_PER_POLL
 
-        for log_file in self._discover_log_files(journal_dir):
+        log_files = self._discover_log_files(journal_dir)
+        self._discovered = {str(p) for p in log_files}
+        for log_file in log_files:
             filepath = str(log_file)
             if filepath not in self._known_files:
                 # New file detected
@@ -247,6 +309,9 @@ class JournalWatcher:
             except Exception as e:
                 # Per-file isolation: one bad file must not block others
                 decky.logger.error(f"Error processing {filepath}: {e}")
+        # Every poll, not only on stop(): an unload that Decky has to SIGKILL
+        # never reaches stop(), and the next instance resumes from here.
+        self._save_positions()
 
     def _discover_log_files(self, journal_dir: Path) -> list[Path]:
         """Name-matched journal files that are safe to open.
@@ -333,6 +398,10 @@ class JournalWatcher:
                 event = self.parser.parse_line(line)
                 if not event:
                     continue
+                if self._dispatch_after is not None and event.timestamp <= self._dispatch_after:
+                    # Sent before the previous instance stopped; parse_line has
+                    # already applied it to session state.
+                    continue
 
                 # Fan every parsed event out to stream consumers (session
                 # stats, future EDSM forwarder) BEFORE the EDDN reportable
@@ -351,8 +420,8 @@ class JournalWatcher:
                 # processing of subsequent events in the same file.
                 decky.logger.error(f"Error processing event in {filepath}: {e}")
 
-    async def _restore_session_state(self, filepath: str) -> None:
-        """Parse a whole journal file for session state only.
+    async def _restore_session_state(self, filepath: str, limit: int | None = None) -> None:
+        """Parse a journal file, up to byte `limit` if given, for session state only.
 
         Each line goes through the parser, which records game version, build,
         horizons/odyssey, commander, position and current body, but nothing is
@@ -362,9 +431,11 @@ class JournalWatcher:
         """
         loop = asyncio.get_running_loop()
         position = 0
-        while not self._stop_requested:
+        while not self._stop_requested and (limit is None or position < limit):
             try:
-                text, new_position = await loop.run_in_executor(None, self._read_lines_from, filepath, position)
+                text, new_position = await loop.run_in_executor(
+                    None, self._read_lines_from, filepath, position, limit,
+                )
             except OSError as e:
                 decky.logger.error(f"Failed to read {filepath}: {e}")
                 return
@@ -383,8 +454,8 @@ class JournalWatcher:
         """Read complete new lines from the stored offset. Runs in a thread."""
         return self._read_lines_from(filepath, self._file_positions.get(filepath, 0))
 
-    def _read_lines_from(self, filepath: str, position: int) -> tuple[str, int]:
-        """Read complete lines starting at byte `position`. Runs in a thread.
+    def _read_lines_from(self, filepath: str, position: int, limit: int | None = None) -> tuple[str, int]:
+        """Read complete lines starting at byte `position`, never past `limit`. Runs in a thread.
 
         Returns the decoded text (empty, or ending in a newline) plus the byte
         offset to store. OSError propagates to the caller, which logs it.
@@ -397,10 +468,11 @@ class JournalWatcher:
                     f"{Path(filepath).name} shrank to {size} bytes (was at {position}), re-reading from the start"
                 )
                 position = 0
-            if size <= position:
+            if size <= position or (limit is not None and position >= limit):
                 return "", position
             f.seek(position)
-            chunk = f.read(JOURNAL_READ_CHUNK_BYTES)
+            to_read = JOURNAL_READ_CHUNK_BYTES if limit is None else min(JOURNAL_READ_CHUNK_BYTES, limit - position)
+            chunk = f.read(to_read)
 
         if not chunk:
             return "", position
@@ -730,3 +802,53 @@ class JournalWatcher:
             ts_file.write_text(datetime.now(timezone.utc).isoformat())
         except OSError as e:
             decky.logger.error(f"Failed to save last-active timestamp: {e}")
+
+    @staticmethod
+    def _positions_file() -> Path | None:
+        runtime_dir = os.environ.get("DECKY_PLUGIN_RUNTIME_DIR", "")
+        return Path(runtime_dir) / "journal_positions.json" if runtime_dir else None
+
+    def _load_positions(self) -> dict[str, int]:
+        """Load the previous instance's read offsets. Never raises; {} when unusable."""
+        path = self._positions_file()
+        if path is None:
+            return {}
+        try:
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_JOURNAL_POSITIONS_FILE_BYTES:
+                decky.logger.warning(f"Ignoring {path.name}: not a regular file within the size limit")
+                return {}
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            decky.logger.warning(f"Ignoring unreadable {path.name}: {e}")
+            return {}
+        positions = data.get("positions") if isinstance(data, dict) else None
+        if not isinstance(positions, dict):
+            return {}
+        loaded = {
+            filepath: offset
+            for filepath, offset in positions.items()
+            if isinstance(filepath, str) and type(offset) is int and offset >= 0
+        }
+        self._persisted_positions = dict(loaded)
+        return loaded
+
+    def _save_positions(self) -> None:
+        """Atomically persist read offsets for the journals currently present. Never raises."""
+        positions = {
+            filepath: offset for filepath, offset in self._file_positions.items() if filepath in self._discovered
+        }
+        path = self._positions_file()
+        if path is None or positions == self._persisted_positions:
+            return
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps({"positions": positions}), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as e:
+            decky.logger.error(f"Failed to save journal positions: {e}")
+            return
+        self._persisted_positions = positions

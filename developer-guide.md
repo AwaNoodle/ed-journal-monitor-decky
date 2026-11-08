@@ -68,9 +68,9 @@ flowchart LR
 
 1. **ED starts.** `index.tsx` receives `SteamClient.GameSessions.RegisterForAppLifetimeNotifications` and calls `set_ed_running(true)`, which resets session counters and calls `on_session_start()` on every stream consumer. At plugin load, `check_ed_running()` catches a game that was already running: it scans `/proc` for the ED process, then falls back to "a journal file was modified in the last five minutes".
 2. **Path discovery.** `find_journal_path()` returns the cached path or scans Steam's `libraryfolders.vdf`; a manually set path is the fallback for non-Steam installs.
-3. **Watcher starts.** `start_watcher()` replays any journal files modified since the persisted `last_active` timestamp (or, on first run, the newest file, to pick up commander and game-version state), then polls every 10 s.
+3. **Watcher starts.** `start_watcher()` resumes each journal from the read offset the previous plugin instance saved (`journal_positions.json` in the runtime dir). Journals without a saved offset fall back to `last_active`: their events up to that time only rebuild session state, and later events are sent. On first run it reads the newest file to pick up commander and game-version state. It then polls every 10 s.
 4. **Suspend/resume.** `SteamClient.System.RegisterForOnResumeFromSuspend` re-checks status and stops the watcher if uploading was disabled meanwhile.
-5. **ED stops.** `set_ed_running(false)` then `stop_watcher()`; the watcher persists `last_active` for the next catch-up, and every consumer gets `on_session_stop()` (EDSM flushes its final batch).
+5. **ED stops.** `set_ed_running(false)` then `stop_watcher()`; the watcher persists its read offsets and `last_active` for the next start, and every consumer gets `on_session_stop()` (EDSM flushes its final batch).
 
 ### Journal watching
 
