@@ -43,13 +43,12 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "Docked": ["timestamp", "StationName", "StarSystem", "SystemAddress"],
     "FSSDiscoveryScan": ["timestamp", "SystemAddress"],
     "NavRoute": ["timestamp", "event", "Route"],
-    "ApproachSettlement": [
-        "timestamp", "StarSystem", "SystemAddress",
-        "BodyID", "BodyName", "MarketID", "Latitude", "Longitude",
-    ],
+    # StarSystem is added by the transform; MarketID is optional upstream.
+    "ApproachSettlement": ["timestamp", "SystemAddress", "BodyID", "BodyName", "Latitude", "Longitude"],
     "CarrierJump": ["timestamp", "StarSystem", "SystemAddress", "StarPos"],
     "FSSSignalDiscovered": ["timestamp", "SystemAddress", "SignalName"],
-    "SAASignalsFound": ["timestamp", "StarSystem", "SystemAddress"],
+    # StarSystem is added by the transform from session state.
+    "SAASignalsFound": ["timestamp", "SystemAddress"],
     "CodexEntry": ["timestamp", "SystemAddress", "EntryID"],
     "NavBeaconScan": ["timestamp", "NumBodies"],
     "FSSAllBodiesFound": ["timestamp", "SystemName", "SystemAddress", "Count"],
@@ -234,6 +233,14 @@ class EDDNValidator:
     # must not require it (e.g. dockinggranted/1, dockingdenied/1).
     _NO_STARPOS_EVENTS: ClassVar[set[str]] = {"DockingGranted", "DockingDenied"}
 
+    # Events whose schema requires a system name the journal event may lack,
+    # mapped to that schema's field name; the transform adds it.
+    _AUGMENTED_SYSTEM_FIELD: ClassVar[dict[str, str]] = {
+        "ApproachSettlement": "StarSystem",
+        "CodexEntry": "System",
+        "SAASignalsFound": "StarSystem",
+    }
+
     def validate(self, event: ParsedEvent, session_state: SessionState | None = None) -> bool:  # noqa: PLR0911
         """
         Validate that an event has all required fields for its type.
@@ -259,14 +266,14 @@ class EDDNValidator:
         if event.event_type == "ApproachSettlement" and "StationName" not in event.raw and "Name" not in event.raw:
             return False
 
-        # codexentry/1 requires System. The journal event normally carries
-        # it, and transform_codex_entry() augments it from
-        # session_state.star_system when it does not -- but reject here when
-        # neither source can supply it, rather than let the transform build a
-        # message missing a required property.
+        # The system name is required by the schema but absent from these
+        # journal events; the transform augments it from session_state.
+        # Reject when session state cannot supply it, rather than let the
+        # transform build a message missing a required property.
+        system_field = self._AUGMENTED_SYSTEM_FIELD.get(event.event_type)
         if (
-            event.event_type == "CodexEntry"
-            and "System" not in event.raw
+            system_field is not None
+            and system_field not in event.raw
             and (not session_state or not session_state.star_system)
         ):
             return False

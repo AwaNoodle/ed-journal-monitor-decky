@@ -41,7 +41,7 @@ from src.modules.constants import (
     SOFTWARE_NAME,
     SOFTWARE_VERSION,
 )
-from src.modules.parser import ParsedEvent, SessionState
+from src.modules.parser import JournalParser, ParsedEvent, SessionState
 from src.modules.validator import EDDNValidator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -144,6 +144,77 @@ class TestApproachSettlementConformance:
         session_state = SessionState(horizons=True, odyssey=True)
         message = validator.transform_approach_settlement(event, session_state)
         _assert_conforms(message, EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF)
+
+
+class TestRealJournalShapes:
+    """Events exactly as the game writes them, after the jump that set session state.
+
+    The game never writes StarSystem on ApproachSettlement or SAASignalsFound;
+    the transform adds it. Requiring it in validate() dropped every one of
+    these events before transform (8 of 8 ApproachSettlements in a real
+    session on 2026-11-08).
+    """
+
+    JUMP = (
+        '{ "timestamp":"2026-11-08T20:49:19Z", "event":"FSDJump", "StarSystem":"Yoru", '
+        '"SystemAddress":6131367744226, "StarPos":[-42.40625,-12.15625,-1.96875] }'
+    )
+    APPROACH_SETTLEMENT = (
+        '{ "timestamp":"2026-11-08T20:52:57Z", "event":"ApproachSettlement", "Name":"Huxley Beacon", '
+        '"MarketID":3518281472, "StationFaction":{ "Name":"Party of Yoru", "FactionState":"Boom" }, '
+        '"StationGovernment":"$government_Dictatorship;", "StationGovernment_Localised":"Dictatorship", '
+        '"StationServices":[  ], "StationEconomy":"$economy_Refinery;", "StationEconomy_Localised":"Refinery", '
+        '"StationEconomies":[ { "Name":"$economy_Refinery;", "Name_Localised":"Refinery", "Proportion":1.000000 } ], '
+        '"SystemAddress":6131367744226, "BodyID":6, "BodyName":"Yoru 2", '
+        '"Latitude":32.709343, "Longitude":-39.466022 }'
+    )
+    SAA_SIGNALS_FOUND = (
+        '{ "timestamp":"2026-11-08T20:58:12Z", "event":"SAASignalsFound", "BodyName":"Yoru 2", '
+        '"SystemAddress":6131367744226, "BodyID":6, "Signals":[ { "Type":"$SAA_SignalType_Geological;", '
+        '"Type_Localised":"Geological", "Count":3 } ], "Genuses":[ { "Genus":"$Codex_Ent_Bacterial_Genus_Name;", '
+        '"Genus_Localised":"Bacterium" } ] }'
+    )
+    OTHER_SYSTEM_JUMP = (
+        '{ "timestamp":"2026-11-08T20:40:00Z", "event":"FSDJump", "StarSystem":"Sol", '
+        '"SystemAddress":10477373803, "StarPos":[0.0,0.0,0.0] }'
+    )
+
+    def _parsed(self, *lines: str) -> tuple[ParsedEvent, SessionState]:
+        parser = JournalParser()
+        parsed = [parser.parse_line(line) for line in lines]
+        parser.session_state.horizons = parser.session_state.odyssey = True
+        return parsed[-1], parser.session_state
+
+    @pytest.mark.parametrize("drop_market_id", [False, True])
+    def test_approach_settlement_is_sent_and_conforms(self, validator, drop_market_id):
+        """MarketID is optional upstream: settlements without one are valid messages too."""
+        line = self.APPROACH_SETTLEMENT
+        if drop_market_id:
+            line = line.replace('"MarketID":3518281472, ', "")
+        event, state = self._parsed(self.JUMP, line)
+
+        assert validator.validate(event, state) is True
+        message = validator.transform_approach_settlement(event, state)
+        assert message["message"]["StarSystem"] == "Yoru"
+        _assert_conforms(message, EDDN_APPROACHSETTLEMENT_1_SCHEMA_REF)
+
+    def test_saa_signals_found_is_sent_and_conforms(self, validator):
+        event, state = self._parsed(self.JUMP, self.SAA_SIGNALS_FOUND)
+
+        assert validator.validate(event, state) is True
+        message = validator.transform(event, state)
+        assert message["message"]["StarSystem"] == "Yoru"
+        _assert_conforms(message, EDDN_JOURNAL_1_SCHEMA_REF)
+
+    @pytest.mark.parametrize(
+        "line", [APPROACH_SETTLEMENT, SAA_SIGNALS_FOUND], ids=["ApproachSettlement", "SAASignalsFound"],
+    )
+    @pytest.mark.parametrize("before", [(), (OTHER_SYSTEM_JUMP,)], ids=["no-location-yet", "different-system"])
+    def test_not_sent_when_the_system_cannot_be_supplied(self, validator, line, before):
+        """Without a matching location the transform could not add StarSystem/StarPos."""
+        event, state = self._parsed(*before, line)
+
+        assert validator.validate(event, state) is False
 
 
 class TestCodexEntryConformance:

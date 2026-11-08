@@ -144,6 +144,21 @@ is still current):
   entirely (never `null`/`""`), matching the README's "If you cannot properly obtain the
   values ... then you MUST NOT include them."
 
+Branch `fix/augmented-required-fields` (`REQUIRED_FIELDS` realignment for two more events;
+no upstream schema change involved - `4ad669b` is still current):
+
+- `REQUIRED_FIELDS["ApproachSettlement"]` no longer requires `StarSystem` (never in the
+  journal event; the transform adds it) or `MarketID` (optional in approachsettlement-v1.0.json).
+  `REQUIRED_FIELDS["SAASignalsFound"]` no longer requires `StarSystem` either. Replaying a
+  real 2026-11-08 session showed 8 of 8 ApproachSettlement and 1 of 1 SAASignalsFound events
+  dropped before transform.
+- The CodexEntry-only `System` guard in `validate()` now covers all three events: an event
+  without its schema's system-name field is rejected only when `session_state.star_system`
+  cannot supply it.
+- Still stricter than upstream but not changed, because the game always writes these fields:
+  `Scan` (`ScanType`, `BodyName`, `DistanceFromArrivalLS`), `Docked` (`StationName`),
+  `FSSSignalDiscovered` (`SignalName`), `FSSBodySignals` (`BodyName`). None failed in that replay.
+
 ## EDSM
 
 No versioned upstream to diff against - EDSM's public API has no schema repo, so this section

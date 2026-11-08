@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Updating or reloading the plugin while the game is running no longer re-uploads the whole play session to EDDN and EDSM; it picks up exactly where it left off.
+- Settlement approaches and planetary signal scans (surface signals found by mapping a body) are now sent to EDDN; until now they were always discarded.
 
 ## [1.0.1] - 2026-11-08
 
