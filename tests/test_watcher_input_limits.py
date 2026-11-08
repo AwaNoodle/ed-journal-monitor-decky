@@ -209,6 +209,29 @@ class TestIncrementalByteReads:
         assert watcher._file_positions[str(journal)] == journal.stat().st_size
 
     @pytest.mark.asyncio
+    async def test_reload_restore_reads_past_the_chunk_cap_and_a_bad_line(self, watcher, tmp_path, monkeypatch):
+        """Restoring session state on reload walks every capped chunk and survives a malformed line."""
+        longest = max(len(line.encode()) for line in (FILEHEADER, LOADGAME, jump_line("Sol")))
+        monkeypatch.setattr(watcher_mod, "JOURNAL_READ_CHUNK_BYTES", longest + 10)
+        journal = tmp_path / "Journal.2026-01-12T120000.01.log"
+        # `[]` is valid JSON but not an event object; the parser raises on it.
+        torn = '{"timestamp":"2026-01-12T12:06'
+        journal.write_text(FILEHEADER + "[]\n" + LOADGAME + jump_line("Sol") + torn, encoding="utf-8")
+        os.utime(journal, (1_768_219_200, 1_768_219_200))  # 2026-01-12T12:00:00Z
+        consumer = RecordingConsumer()
+        watcher._consumers = [consumer]
+        watcher._journal_path = str(tmp_path)
+
+        await watcher._initial_scan(last_active="2026-01-12T13:00:00+00:00")
+
+        state = watcher.parser.session_state
+        assert (state.game_version, state.odyssey, state.star_system) == ("4.3.0.1", True, "Sol")
+        assert consumer.observed == []
+        # The torn trailing line stays unread, to be dispatched once the game completes it.
+        complete = FILEHEADER + "[]\n" + LOADGAME + jump_line("Sol")
+        assert watcher._file_positions[str(journal)] == len(complete.encode())
+
+    @pytest.mark.asyncio
     async def test_truncated_file_is_re_read_from_the_start(self, watcher, tmp_path):
         journal = tmp_path / "Journal.2026-01-12T120000.01.log"
         journal.write_text(FILEHEADER + LOADGAME + jump_line("Sol"), encoding="utf-8")
