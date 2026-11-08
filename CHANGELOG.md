@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-08
+
 ### Fixed
 
 - Updating or reloading the plugin while the game is running no longer re-uploads the whole play session to EDDN and EDSM; it picks up exactly where it left off.
